@@ -53,7 +53,7 @@ import type {
 } from "./storage-contract";
 import type { AppContext, AppEnv, AuthContext, Bindings, WorkerBindings } from "./api-context";
 import { AppError } from "./app-error";
-import { hashPassword } from "./auth-crypto";
+import { hashPassword, randomToken } from "./auth-crypto";
 import {
   apiError,
   authNotConfigured,
@@ -72,6 +72,7 @@ import {
 import { registerTagRoutes } from "./tag-routes";
 import { registerTemplateRoutes } from "./template-routes";
 import { registerAuthRoutes } from "./auth-routes";
+import { registerOAuthRoutes } from "./oauth-routes";
 import { registerApiTokenRoutes } from "./api-token-routes";
 import { registerObjectStorageRoutes } from "./object-storage-routes";
 import { registerAiRoutes } from "./ai-routes";
@@ -319,6 +320,49 @@ registerAiPromptRoutes(app, {
 
 registerApiTokenRoutes(app, {
   sha256: (...args) => sha256(...args),
+});
+
+registerOAuthRoutes(app, {
+  getAdminUser: async (c) => {
+    // Find admin/owner user from database
+    const user = await c.env.storage.db.prepare(
+      `SELECT u.id, u.username, wm.workspace_id
+       FROM users u
+       INNER JOIN workspace_members wm ON wm.user_id = u.id
+       WHERE u.is_disabled = 0
+       ORDER BY CASE WHEN wm.role = 'owner' THEN 0 ELSE 1 END, u.created_at ASC
+       LIMIT 1`
+    ).first<{ id: string; username: string; workspace_id: string }>();
+
+    if (user) {
+      return { id: user.id, username: user.username, workspaceId: user.workspace_id };
+    }
+
+    // Fallback if users table doesn't have workspace member yet
+    const anyUser = await c.env.storage.db.prepare(
+      `SELECT id, username FROM users WHERE is_disabled = 0 ORDER BY created_at ASC LIMIT 1`
+    ).first<{ id: string; username: string }>();
+
+    if (anyUser) {
+      return { id: anyUser.id, username: anyUser.username, workspaceId: DEFAULT_WORKSPACE_ID };
+    }
+
+    return null;
+  },
+  createApiToken: async (c, user, label) => {
+    const id = createId("tok");
+    const token = `eev_${randomToken(32)}`;
+    const now = isoNow();
+    const scopes = ["read:memos", "write:memos", "read:notebooks", "write:notebooks", "read:resources", "write:resources", "read:tags", "write:tags"];
+    const hash = await sha256(token);
+
+    await c.env.storage.db.prepare(
+      `INSERT INTO api_tokens (id, workspace_id, name, token_hash, token_value, scopes_json, expires_at, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, NULL, ?)`
+    ).bind(id, user.workspaceId, label, hash, token, JSON.stringify(scopes), now).run();
+
+    return token;
+  },
 });
 registerNotebookRoutes(app, async (env) => {
   if (isDemoMode(env)) await ensureDemoSeed(env);

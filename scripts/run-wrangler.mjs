@@ -372,6 +372,19 @@ crons = [${tomlString(demoResetCron)}]
 `;
 }
 
+const workerFirstPatterns = [
+  "/api/*",
+  "/mcp",
+  "/oauth/*",
+  "/.well-known/*",
+  "/__scheduled",
+];
+config = config.replace(
+  /run_worker_first\s*=\s*\[[^\]]*\]/m,
+  `run_worker_first = ${JSON.stringify(workerFirstPatterns)}`,
+);
+changed = true;
+
 const customDomain = envValue("CUSTOM_DOMAIN");
 const routePattern = envValue("ROUTE_PATTERN") || customDomain;
 if (routePattern) {

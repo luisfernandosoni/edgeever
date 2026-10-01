@@ -40,7 +40,20 @@ type McpRouteDependencies = {
 
 export const isAllowedMcpOrigin = (requestUrl: string, origin: string) => {
   try {
-    return new URL(origin).origin === new URL(requestUrl).origin;
+    const originUrl = new URL(origin);
+    const reqUrl = new URL(requestUrl);
+    if (originUrl.origin === reqUrl.origin) return true;
+    // Allow Google and Gemini Spark origins for remote MCP calls
+    const host = originUrl.hostname.toLowerCase();
+    if (
+      host === "google.com" ||
+      host.endsWith(".google.com") ||
+      host === "googleusercontent.com" ||
+      host.endsWith(".googleusercontent.com")
+    ) {
+      return true;
+    }
+    return false;
   } catch {
     return false;
   }
