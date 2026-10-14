@@ -1,11 +1,20 @@
 import SwiftUI
 import UIKit
-import Pow
 
 /// Wrapper so `fullScreenCover(item:)` can present edit for a memo id.
 struct EditingMemoRoute: Identifiable, Hashable {
     let id: String
     let initialFocus: MemoEditInitialFocus
+}
+
+private struct ShareImageMemoRoute: Hashable {
+    let memoId: String
+}
+
+private struct SelectionSharePayload: Identifiable {
+    let id = UUID()
+    let message: String
+    let url: URL
 }
 
 struct WorkspaceView: View {
@@ -21,13 +30,12 @@ struct WorkspaceView: View {
     @State private var createLongPressConsumed = false
     @State private var showMoveSheet = false
     @State private var showSelectionMore = false
+    @State private var pendingMemoShare: MemoSummary?
+    @State private var pendingImageShareMemoId: String?
+    @State private var selectionSharePayload: SelectionSharePayload?
     @State private var conflictItem: OutboxItem?
-    @State private var createTapCount = 0
-    @State private var syncPulse = 0
     /// Edit is presented from the workspace root — more reliable than cover on a pushed detail page.
     @State private var editingMemo: EditingMemoRoute?
-    /// Create finished id, applied as list bounce after cover dismiss + reload.
-    @State private var pendingCreateBounceId: String?
     @State private var incomingClipURL: URL?
     @State private var isImportingShare = false
     @State private var shareImportAlert: ShareImportAlert?
@@ -57,7 +65,11 @@ struct WorkspaceView: View {
                             store: store,
                             path: $path,
                             onCreateNote: { openCreateNote() },
-                            onCreateFromTemplate: { openCreateFromTemplate() }
+                            onCreateFromTemplate: { openCreateFromTemplate() },
+                            onCreateNotebook: {
+                                store.startCreatingNotebook = true
+                                store.showNotebookPicker = true
+                            }
                         )
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
@@ -74,19 +86,10 @@ struct WorkspaceView: View {
             .ignoresSafeArea(.container, edges: .bottom)
             .navigationBarHidden(true)
             .navigationDestination(for: String.self) { memoId in
-                MemoDetailView(memoId: memoId) { editId, initialFocus in
-                    // 1) Show edit cover over detail.
-                    editingMemo = EditingMemoRoute(id: editId, initialFocus: initialFocus)
-                    // 2) After the cover is up, silently drop detail so the underlay is the list.
-                    //    Dismissing edit then reveals list only — no detail flash.
-                    DispatchQueue.main.async {
-                        var t = Transaction()
-                        t.disablesAnimations = true
-                        withTransaction(t) {
-                            path = NavigationPath()
-                        }
-                    }
-                }
+                memoDetail(for: memoId)
+            }
+            .navigationDestination(for: ShareImageMemoRoute.self) { route in
+                memoDetail(for: route.memoId, shareImage: true)
             }
             // Android CreateMemoModal is fullScreen — not a half sheet / Form.
             .fullScreenCover(isPresented: $showNewNote) {
@@ -96,12 +99,8 @@ struct WorkspaceView: View {
                         seed: createSeed
                     ),
                     initialSharedImages: createSharedImages,
-                    onCreateFinished: { memoId in
-                        // Prime list + bounce **before** dismiss so settle runs under/with the cover,
-                        // not half a second after the list is already static.
+                    onCreateFinished: { _ in
                         store.reload(env: env)
-                        store.requestMemoBounce(memoId: memoId)
-                        pendingCreateBounceId = nil
                     }
                 )
                 .onDisappear {
@@ -131,11 +130,7 @@ struct WorkspaceView: View {
                     onLeaveToList: {
                         // Pop detail first (no animation) while cover still covers the stack,
                         // then dismiss the cover so the user only ever sees the list.
-                        let bounceId = route.id
-                        // Reload + start settle **before** clearing the cover so the spring
-                        // is already in motion when the list is revealed (no post-dismiss pause).
                         store.reload(env: env)
-                        store.requestMemoBounce(memoId: bounceId)
                         var t = Transaction()
                         t.disablesAnimations = true
                         withTransaction(t) {
@@ -158,7 +153,8 @@ struct WorkspaceView: View {
                     maxSelections: 1,
                     closeOnSelection: true,
                     title: "按标签筛选",
-                    titleEN: "Filter by tag"
+                    titleEN: "Filter by tag",
+                    titlePL: "Filtruj według tagu"
                 ) { tags in
                     store.selectTag(tags.first)
                     store.reload(env: env)
@@ -173,10 +169,35 @@ struct WorkspaceView: View {
                     }
                 }
             }
-            .sheet(isPresented: $showSelectionMore) {
-                SelectionMoreSheet(store: store)
-                    .presentationDetents([.height(290), .medium])
+            .sheet(isPresented: $showSelectionMore, onDismiss: {
+                if let memo = pendingMemoShare {
+                    pendingMemoShare = nil
+                    Task { await shareSelectedMemo(memo) }
+                    return
+                }
+                guard let memoId = pendingImageShareMemoId else { return }
+                pendingImageShareMemoId = nil
+                store.clearSelection()
+                path.append(ShareImageMemoRoute(memoId: memoId))
+            }) {
+                SelectionMoreSheet(
+                    store: store,
+                    onShare: { memo in pendingMemoShare = memo },
+                    onShareImage: { memo in pendingImageShareMemoId = memo.id }
+                )
+                    .presentationDetents([.height(390), .medium])
                     .presentationDragIndicator(.hidden)
+            }
+            .sheet(item: $selectionSharePayload) { payload in
+                ActivityShareView(items: [payload.message, payload.url]) { _, _, error in
+                    if let error {
+                        shareImportAlert = ShareImportAlert(
+                            title: env.preferences.t("分享失败", en: "Share failed", pl: "Udostępnianie nie powiodło się"),
+                            message: error.localizedDescription
+                        )
+                    }
+                    selectionSharePayload = nil
+                }
             }
             .sheet(item: $conflictItem) { item in
                 ConflictResolutionView(item: item) {
@@ -199,7 +220,6 @@ struct WorkspaceView: View {
                 // Refresh list when a background/bootstrap sync finishes.
                 if wasSyncing && !isSyncing {
                     store.reload(env: env)
-                    syncPulse += 1
                 }
             }
             // Android invalidates the memo list on each bootstrap batch so the UI
@@ -208,6 +228,9 @@ struct WorkspaceView: View {
                 store.reload(env: env)
             }
             .onChange(of: env.bootstrapProgress?.totalCount) { _, _ in
+                store.reload(env: env)
+            }
+            .onChange(of: env.preferences.showDescendantNotes) { _, _ in
                 store.reload(env: env)
             }
             .refreshable {
@@ -223,10 +246,10 @@ struct WorkspaceView: View {
                             ProgressView()
                                 .controlSize(.large)
                                 .tint(AppTheme.accent)
-                            Text(env.preferences.t("正在剪藏文章", en: "Clipping article", ja: "記事を取り込んでいます"))
+                            Text(env.preferences.t("正在剪藏文章", en: "Clipping article", ja: "記事を取り込んでいます", pl: "Przechwytywanie artykułu"))
                                 .font(.system(size: 17, weight: .bold))
                                 .foregroundStyle(AppTheme.title)
-                            Text(env.preferences.t("正在提取标题、正文和图片链接…", en: "Extracting the title, body, and image links…", ja: "タイトル、本文、画像リンクを抽出しています…"))
+                            Text(env.preferences.t("正在提取标题、正文和图片链接…", en: "Extracting the title, body, and image links…", ja: "タイトル、本文、画像リンクを抽出しています…", pl: "Wyodrębnianie tytułu, treści i linków do obrazów…"))
                                 .font(.system(size: 13))
                                 .foregroundStyle(AppTheme.secondary)
                                 .multilineTextAlignment(.center)
@@ -253,7 +276,7 @@ struct WorkspaceView: View {
                 Alert(
                     title: Text(alert.title),
                     message: Text(alert.message),
-                    dismissButton: .default(Text(env.preferences.t("好的", en: "OK"))) {
+                    dismissButton: .default(Text(env.preferences.t("好的", en: "OK", pl: "OK"))) {
                         if let draft = alert.draft { finishClip(draft) }
                     }
                 )
@@ -278,8 +301,8 @@ struct WorkspaceView: View {
                             .frame(width: 38, height: 38)
                     }
                     Text(store.selectedMemoIds.isEmpty
-                        ? env.preferences.t("选择笔记", en: "Select notes")
-                        : env.preferences.t("已选择 \(store.selectedMemoIds.count) 条", en: "\(store.selectedMemoIds.count) selected"))
+                        ? env.preferences.t("选择笔记", en: "Select notes", pl: "Wybierz notatki")
+                        : env.preferences.t("已选择 \(store.selectedMemoIds.count) 条", en: "\(store.selectedMemoIds.count) selected", pl: "Zaznaczone: \(store.selectedMemoIds.count)"))
                         .font(.system(size: 17, weight: .heavy))
                         .foregroundStyle(AppTheme.title)
                         .padding(.horizontal, 8)
@@ -302,7 +325,7 @@ struct WorkspaceView: View {
                                 .font(.system(size: 13, weight: .semibold))
                                 .foregroundStyle(AppTheme.secondary)
                         }
-                        Text(store.selectedTag.map { "#\($0)" } ?? store.activeNotebook?.name ?? env.preferences.t("全部笔记", en: "All notes"))
+                        Text(store.selectedTag.map { "#\($0)" } ?? store.activeNotebook?.name ?? env.preferences.t("全部笔记", en: "All notes", pl: "Wszystkie notatki"))
                             .font(AppTheme.notebookTitleFont)
                             .foregroundStyle(AppTheme.title)
                             .lineLimit(1)
@@ -317,8 +340,8 @@ struct WorkspaceView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel(
                     store.selectedTag == nil
-                        ? env.preferences.t("切换笔记本", en: "Switch notebook")
-                        : env.preferences.t("返回笔记列表", en: "Back to notes")
+                        ? env.preferences.t("切换笔记本", en: "Switch notebook", pl: "Przełącz notatnik")
+                        : env.preferences.t("返回笔记列表", en: "Back to notes", pl: "Wróć do notatek")
                 )
                 Spacer(minLength: 8)
                 Button {
@@ -331,7 +354,7 @@ struct WorkspaceView: View {
                         .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(env.preferences.t("列表选项", en: "List options"))
+                .accessibilityLabel(env.preferences.t("列表选项", en: "List options", pl: "Opcje listy"))
             }
             .padding(.bottom, 12)
 
@@ -340,8 +363,7 @@ struct WorkspaceView: View {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(searchActive ? AppTheme.accent : AppTheme.secondary)
-                        .symbolEffect(.bounce, value: searchActive)
-                    TextField(env.preferences.t("搜索笔记", en: "Search notes"), text: $store.searchText)
+                    TextField(env.preferences.t("搜索笔记", en: "Search notes", pl: "Szukaj notatek"), text: $store.searchText)
                         .font(AppTheme.searchFont)
                         .foregroundStyle(AppTheme.title)
                         .textInputAutocapitalization(.never)
@@ -375,7 +397,7 @@ struct WorkspaceView: View {
                     active: store.filter == .pinned,
                     // Match Android pin filter glyph (star outline / filled when active)
                     systemImage: store.filter == .pinned ? "star.fill" : "star",
-                    label: env.preferences.t("置顶", en: "Pinned")
+                    label: env.preferences.t("置顶", en: "Pinned", pl: "Przypięte")
                 ) {
                     withAnimation(Motion.chip) {
                         store.toggleFilter(.pinned)
@@ -386,7 +408,7 @@ struct WorkspaceView: View {
                     active: store.selectedTag != nil,
                     systemImage: store.selectedTag == nil ? "tag" : "tag.fill",
                     label: store.selectedTag.map { "#\($0)" }
-                        ?? env.preferences.t("按标签筛选", en: "Filter by tag")
+                        ?? env.preferences.t("按标签筛选", en: "Filter by tag", pl: "Filtruj według tagu")
                 ) {
                     store.showTagFilterPicker = true
                 }
@@ -420,7 +442,7 @@ struct WorkspaceView: View {
                 HStack(spacing: 4) {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 10, weight: .bold))
-                    Text(env.preferences.t("正在搜索", en: "Searching"))
+                    Text(env.preferences.t("正在搜索", en: "Searching", pl: "Wyszukiwanie"))
                         .font(.system(size: 12, weight: .bold))
                 }
                 .foregroundStyle(.white)
@@ -429,23 +451,23 @@ struct WorkspaceView: View {
                 .background(AppTheme.accent)
                 .clipShape(Capsule())
 
-                Text(env.preferences.t("\(store.totalCount) 条结果", en: "\(store.totalCount) results"))
+                Text(env.preferences.t("\(store.totalCount) 条结果", en: "\(store.totalCount) results", pl: "Wyniki: \(store.totalCount)"))
                     .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(AppTheme.accentText)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
-                Button(env.preferences.t("退出搜索", en: "Exit")) {
+                Button(env.preferences.t("退出搜索", en: "Exit", pl: "Zakończ")) {
                     store.searchText = ""
                     store.reload(env: env)
                 }
                 .font(.system(size: 12, weight: .bold))
                 .foregroundStyle(AppTheme.accentText)
             } else {
-                Text(env.preferences.t("筛选：\(filterLabel) · \(store.totalCount) 条", en: "Filter: \(filterLabelEN) · \(store.totalCount)"))
+                Text(env.preferences.t("筛选：\(filterLabel) · \(store.totalCount) 条", en: "Filter: \(filterLabelEN) · \(store.totalCount)", pl: "Filtr: \(filterLabelPL) · \(store.totalCount)"))
                     .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(AppTheme.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                Button(env.preferences.t("重置", en: "Reset")) {
+                Button(env.preferences.t("重置", en: "Reset", pl: "Resetuj")) {
                     if store.selectedTag != nil {
                         clearTagFilter()
                     } else {
@@ -496,6 +518,16 @@ struct WorkspaceView: View {
         }
     }
 
+    private var filterLabelPL: String {
+        if let selectedTag = store.selectedTag { return "#\(selectedTag)" }
+        switch store.filter {
+        case .pinned: return "Przypięte"
+        case .tagged: return "Z tagami"
+        case .untagged: return "Bez tagów"
+        case .all: return "Wszystkie"
+        }
+    }
+
     private func clearTagFilter() {
         store.clearTagFilter()
         store.reload(env: env)
@@ -511,14 +543,8 @@ struct WorkspaceView: View {
                 .clipShape(Circle())
                 .overlay(Circle().stroke(active ? AppTheme.filterActive : AppTheme.border, lineWidth: 1))
                 .accessibilityLabel(label)
-                // Quiet ring when filter turns on (lower opacity than before — less "showy" than Android)
-                .changeEffect(
-                    .ping(shape: Circle(), style: AppTheme.filterActive.opacity(0.22), count: 1),
-                    value: active,
-                    isEnabled: active
-                )
         }
-        .buttonStyle(FilterChipButtonStyle(active: active))
+        .buttonStyle(.plain)
     }
 
     /// Bottom tab chrome:
@@ -541,7 +567,7 @@ struct WorkspaceView: View {
             HStack(spacing: 0) {
                 bottomNavItem(
                     systemImage: "house.fill",
-                    label: env.preferences.t("首页", en: "Home"),
+                    label: env.preferences.t("首页", en: "Home", pl: "Start"),
                     active: !showSettings
                 ) {
                     showSettings = false
@@ -558,7 +584,6 @@ struct WorkspaceView: View {
                         createLongPressConsumed = false
                         return
                     }
-                    createTapCount += 1
                     openCreateNote()
                 } label: {
                     Image(systemName: "plus")
@@ -575,7 +600,7 @@ struct WorkspaceView: View {
                         )
                         .contentShape(Circle())
                 }
-                .buttonStyle(CreateButtonPressStyle())
+                .buttonStyle(.plain)
                 .simultaneousGesture(
                     LongPressGesture(minimumDuration: 0.45)
                         .onEnded { _ in
@@ -585,16 +610,15 @@ struct WorkspaceView: View {
                             showCreateChoice = true
                         }
                 )
-                .edgeEverCreatePing(count: createTapCount)
                 .disabled(!canCreate)
-                .accessibilityLabel(env.preferences.t("新建笔记", en: "New note"))
-                .accessibilityHint(env.preferences.t("长按可从模板新建", en: "Long-press to create from a template"))
+                .accessibilityLabel(env.preferences.t("新建笔记", en: "New note", pl: "Nowa notatka"))
+                .accessibilityHint(env.preferences.t("长按可从模板新建", en: "Long-press to create from a template", pl: "Przytrzymaj, aby utworzyć z szablonu"))
                 .accessibilityIdentifier("bottomCreateButton")
                 .frame(maxWidth: .infinity)
 
                 bottomNavItem(
                     systemImage: "person",
-                    label: env.preferences.t("我的", en: "Me"),
+                    label: env.preferences.t("我的", en: "Me", pl: "Profil"),
                     active: showSettings
                 ) {
                     showSettings = true
@@ -641,6 +665,38 @@ struct WorkspaceView: View {
         .frame(maxWidth: .infinity)
     }
 
+    private func memoDetail(for memoId: String, shareImage: Bool = false) -> some View {
+        MemoDetailView(memoId: memoId, initialShareImage: shareImage) { editId, initialFocus in
+            editingMemo = EditingMemoRoute(id: editId, initialFocus: initialFocus)
+            // Keep the list under the editor so dismissing it does not flash the detail page.
+            DispatchQueue.main.async {
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) {
+                    path = NavigationPath()
+                }
+            }
+        }
+    }
+
+    private func shareSelectedMemo(_ memo: MemoSummary) async {
+        do {
+            let share = try await env.session.client.createMemoShare(memoId: memo.id)
+            let base = env.session.session?.baseUrl.trimmingCharacters(in: CharacterSet(charactersIn: "/")) ?? ""
+            guard let url = URL(string: "\(base)/share/\(share.token)") else { return }
+            let title = memo.title?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let displayTitle = title?.isEmpty == false
+                ? title!
+                : env.preferences.t("无标题笔记", en: "Untitled note", pl: "Notatka bez tytułu")
+            selectionSharePayload = SelectionSharePayload(message: "\(displayTitle)\n\(url.absoluteString)", url: url)
+        } catch {
+            shareImportAlert = ShareImportAlert(
+                title: env.preferences.t("分享失败", en: "Share failed", pl: "Udostępnianie nie powiodło się"),
+                message: error.localizedDescription
+            )
+        }
+    }
+
     private var selectionBar: some View {
         let bottomInset = MobileUIMetrics.bottomSafeInset
         return VStack(spacing: 0) {
@@ -650,7 +706,7 @@ struct WorkspaceView: View {
                 } label: {
                     VStack(spacing: 4) {
                         Image(systemName: "folder")
-                        Text(env.preferences.t("移动", en: "Move")).font(.caption2.weight(.bold))
+                        Text(env.preferences.t("移动", en: "Move", pl: "Przenieś")).font(.caption2.weight(.bold))
                     }
                 }
                 .frame(maxWidth: .infinity)
@@ -660,7 +716,7 @@ struct WorkspaceView: View {
                 } label: {
                     VStack(spacing: 4) {
                         Image(systemName: "trash")
-                        Text(env.preferences.t("删除", en: "Delete")).font(.caption2.weight(.bold))
+                        Text(env.preferences.t("删除", en: "Delete", pl: "Usuń")).font(.caption2.weight(.bold))
                     }
                 }
                 .frame(maxWidth: .infinity)
@@ -670,7 +726,7 @@ struct WorkspaceView: View {
                 } label: {
                     VStack(spacing: 4) {
                         Image(systemName: "ellipsis")
-                        Text(env.preferences.t("更多", en: "More")).font(.caption2.weight(.bold))
+                        Text(env.preferences.t("更多", en: "More", pl: "Więcej")).font(.caption2.weight(.bold))
                     }
                 }
                 .frame(maxWidth: .infinity)
@@ -700,7 +756,7 @@ struct WorkspaceView: View {
                     ProgressView()
                         .controlSize(.small)
                         .tint(AppTheme.accent)
-                    Text(env.preferences.t("正在同步笔记", en: "Syncing notes"))
+                    Text(env.preferences.t("正在同步笔记", en: "Syncing notes", pl: "Synchronizowanie notatek"))
                         .font(.caption2)
                         .foregroundStyle(AppTheme.secondary)
                     Spacer(minLength: 0)
@@ -738,16 +794,16 @@ struct WorkspaceView: View {
             guard !store.notebooks.isEmpty else {
                 sharedImages.forEach(env.shareHandoff.removeImage)
                 shareImportAlert = ShareImportAlert(
-                    title: env.preferences.t("无法保存图片", en: "Unable to save images"),
-                    message: env.preferences.t("请先在 EdgeEver 中创建一个笔记本。", en: "Create a notebook in EdgeEver first.")
+                    title: env.preferences.t("无法保存图片", en: "Unable to save images", pl: "Nie można zapisać obrazów"),
+                    message: env.preferences.t("请先在 EdgeEver 中创建一个笔记本。", en: "Create a notebook in EdgeEver first.", pl: "Najpierw utwórz notatnik w EdgeEver.")
                 )
                 return
             }
             openCreateNote(
                 seed: CreateMemoSeed(
                     title: sharedImages.count == 1
-                        ? env.preferences.t("分享的图片", en: "Shared image")
-                        : env.preferences.t("分享的图片（\(sharedImages.count) 张）", en: "Shared images (\(sharedImages.count))"),
+                        ? env.preferences.t("分享的图片", en: "Shared image", pl: "Udostępniony obraz")
+                        : env.preferences.t("分享的图片（\(sharedImages.count) 张）", en: "Shared images (\(sharedImages.count))", pl: "Udostępnione obrazy (\(sharedImages.count))"),
                     contentMarkdown: "",
                     tagsText: ""
                 ),
@@ -757,15 +813,15 @@ struct WorkspaceView: View {
         }
         guard let sourceURL = WebClipper.sharedWebURL(from: payloads) else {
             shareImportAlert = ShareImportAlert(
-                title: env.preferences.t("无法剪藏", en: "Unable to clip"),
-                message: env.preferences.t("分享内容里没有可识别的网页链接。", en: "The shared content does not contain a recognizable web link.")
+                title: env.preferences.t("无法剪藏", en: "Unable to clip", pl: "Nie można przechwycić strony"),
+                message: env.preferences.t("分享内容里没有可识别的网页链接。", en: "The shared content does not contain a recognizable web link.", pl: "Udostępniona treść nie zawiera rozpoznawalnego linku do strony.")
             )
             return
         }
         guard !store.notebooks.isEmpty else {
             shareImportAlert = ShareImportAlert(
-                title: env.preferences.t("无法保存剪藏", en: "Unable to save clip"),
-                message: env.preferences.t("请先在 EdgeEver 中创建一个笔记本。", en: "Create a notebook in EdgeEver first.")
+                title: env.preferences.t("无法保存剪藏", en: "Unable to save clip", pl: "Nie można zapisać wycinka"),
+                message: env.preferences.t("请先在 EdgeEver 中创建一个笔记本。", en: "Create a notebook in EdgeEver first.", pl: "Najpierw utwórz notatnik w EdgeEver.")
             )
             return
         }
@@ -787,15 +843,16 @@ struct WorkspaceView: View {
 
     private var webClipLabels: WebClipLabels {
         WebClipLabels(
-            sourceLabel: env.preferences.t("来源", en: "Source", ja: "出典"),
-            capturedAtLabel: env.preferences.t("剪藏时间", en: "Captured at", ja: "取り込み日時"),
+            sourceLabel: env.preferences.t("来源", en: "Source", ja: "出典", pl: "Źródło"),
+            capturedAtLabel: env.preferences.t("剪藏时间", en: "Captured at", ja: "取り込み日時", pl: "Przechwycono"),
             unavailableBody: env.preferences.t(
                 "正文暂时无法抓取，来源链接已保留，可稍后重试。",
                 en: "Could not extract the page text. The source link is kept so you can retry later.",
-                ja: "本文を取り込めませんでした。出典リンクは残してあるので、あとからやり直せます。"
+                ja: "本文を取り込めませんでした。出典リンクは残してあるので、あとからやり直せます。",
+                pl: "Nie udało się wyodrębnić tekstu strony. Link źródłowy został zachowany, więc możesz spróbować ponownie później."
             ),
-            fallbackTitle: env.preferences.t("网页剪藏", en: "Web clip", ja: "ウェブクリップ"),
-            imageAlt: env.preferences.t("图片", en: "Image", ja: "画像"),
+            fallbackTitle: env.preferences.t("网页剪藏", en: "Web clip", ja: "ウェブクリップ", pl: "Wycinek strony"),
+            imageAlt: env.preferences.t("图片", en: "Image", ja: "画像", pl: "Obraz"),
             usesFullwidthColon: env.preferences.uiLanguage == .chinese
         )
     }
@@ -806,19 +863,22 @@ struct WorkspaceView: View {
             return env.preferences.t(
                 "微信文章加载超时。",
                 en: "The WeChat article took too long to load.",
-                ja: "WeChat 記事の読み込みがタイムアウトしました。"
+                ja: "WeChat 記事の読み込みがタイムアウトしました。",
+                pl: "Wczytywanie artykułu WeChat trwało zbyt długo."
             )
         case "页面加载完成，但没有找到可剪藏的正文。":
             return env.preferences.t(
                 "页面加载完成，但没有找到可剪藏的正文。",
                 en: "The page finished loading, but there was no article text to clip.",
-                ja: "ページの読み込みは終わりましたが、取り込める本文がありません。"
+                ja: "ページの読み込みは終わりましたが、取り込める本文がありません。",
+                pl: "Strona została wczytana, ale nie zawiera tekstu artykułu do przechwycenia."
             )
         case "没有找到可剪藏的正文。":
             return env.preferences.t(
                 "没有找到可剪藏的正文。",
                 en: "No article text was found to clip.",
-                ja: "取り込める本文が見つかりません。"
+                ja: "取り込める本文が見つかりません。",
+                pl: "Nie znaleziono tekstu artykułu do przechwycenia."
             )
         default:
             return message
@@ -831,11 +891,12 @@ struct WorkspaceView: View {
             let draft = await WebClipper.build(sourceURL, labels: webClipLabels)
             isImportingShare = false
             shareImportAlert = ShareImportAlert(
-                title: env.preferences.t("正文剪藏失败", en: "Article extraction failed", ja: "本文を取り込めませんでした"),
+                title: env.preferences.t("正文剪藏失败", en: "Article extraction failed", ja: "本文を取り込めませんでした", pl: "Nie udało się wyodrębnić artykułu"),
                 message: localizedCaptureFailure(message) + " " + env.preferences.t(
                     "已保留文章链接，你可以稍后重新分享重试。",
                     en: "The article link was kept. Share it again later to retry.",
-                    ja: "記事リンクは残してあります。あとから再共有してやり直せます。"
+                    ja: "記事リンクは残してあります。あとから再共有してやり直せます。",
+                    pl: "Link do artykułu został zachowany. Udostępnij go ponownie później, aby spróbować jeszcze raz."
                 ),
                 draft: draft
             )
@@ -868,6 +929,15 @@ struct SelectionMoreSheet: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.dismiss) private var dismiss
     @Bindable var store: WorkspaceStore
+    let onShare: (MemoSummary) -> Void
+    let onShareImage: (MemoSummary) -> Void
+
+    private var shareableMemo: MemoSummary? {
+        guard store.selectedMemoIds.count == 1,
+              let memo = store.memos.first(where: { store.selectedMemoIds.contains($0.id) }),
+              !memo.isDeleted else { return nil }
+        return memo
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -879,12 +949,12 @@ struct SelectionMoreSheet: View {
 
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(env.preferences.t("批量操作", en: "Batch actions"))
+                    Text(env.preferences.t("批量操作", en: "Batch actions", pl: "Działania zbiorcze"))
                         .font(.system(size: 16, weight: .heavy))
                         .foregroundStyle(AppTheme.title)
                     Text(store.selectedMemoIds.isEmpty
-                        ? env.preferences.t("选择笔记", en: "Select notes")
-                        : env.preferences.t("已选择 \(store.selectedMemoIds.count) 条", en: "\(store.selectedMemoIds.count) selected"))
+                        ? env.preferences.t("选择笔记", en: "Select notes", pl: "Wybierz notatki")
+                        : env.preferences.t("已选择 \(store.selectedMemoIds.count) 条", en: "\(store.selectedMemoIds.count) selected", pl: "Zaznaczone: \(store.selectedMemoIds.count)"))
                         .font(.system(size: 12))
                         .foregroundStyle(AppTheme.secondary)
                 }
@@ -896,7 +966,7 @@ struct SelectionMoreSheet: View {
                         .frame(width: 34, height: 34)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(env.preferences.t("关闭", en: "Close"))
+                .accessibilityLabel(env.preferences.t("关闭", en: "Close", pl: "Zamknij"))
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 8)
@@ -904,8 +974,8 @@ struct SelectionMoreSheet: View {
             selectionAction(
                 icon: "checkmark.square",
                 label: store.allVisibleMemosSelected
-                    ? env.preferences.t("全不选当前列表", en: "Deselect current list")
-                    : env.preferences.t("全选当前列表", en: "Select current list"),
+                    ? env.preferences.t("全不选当前列表", en: "Deselect current list", pl: "Odznacz bieżącą listę")
+                    : env.preferences.t("全选当前列表", en: "Select current list", pl: "Zaznacz bieżącą listę"),
                 disabled: store.memos.isEmpty
             ) {
                 store.toggleVisibleSelection()
@@ -915,8 +985,8 @@ struct SelectionMoreSheet: View {
             selectionAction(
                 icon: "sparkles",
                 label: store.nextSelectionPinValue
-                    ? env.preferences.t("置顶", en: "Pin")
-                    : env.preferences.t("取消置顶", en: "Unpin"),
+                    ? env.preferences.t("置顶", en: "Pin", pl: "Przypnij")
+                    : env.preferences.t("取消置顶", en: "Unpin", pl: "Odepnij"),
                 disabled: store.selectedMemoIds.isEmpty
             ) {
                 let target = store.nextSelectionPinValue
@@ -925,8 +995,28 @@ struct SelectionMoreSheet: View {
             }
 
             selectionAction(
+                icon: "square.and.arrow.up",
+                label: env.preferences.t("分享笔记", en: "Share note", pl: "Udostępnij notatkę"),
+                disabled: shareableMemo == nil
+            ) {
+                guard let memo = shareableMemo else { return }
+                dismiss()
+                onShare(memo)
+            }
+
+            selectionAction(
+                icon: "photo",
+                label: env.preferences.t("分享为图片", en: "Share as image", pl: "Udostępnij jako obraz"),
+                disabled: shareableMemo == nil
+            ) {
+                guard let memo = shareableMemo else { return }
+                onShareImage(memo)
+                dismiss()
+            }
+
+            selectionAction(
                 icon: "xmark",
-                label: env.preferences.t("取消选择", en: "Clear selection"),
+                label: env.preferences.t("取消选择", en: "Clear selection", pl: "Wyczyść zaznaczenie"),
                 disabled: false
             ) {
                 store.clearSelection()
@@ -979,11 +1069,11 @@ struct MoveNotebookSheet: View {
                 .padding(.bottom, 8)
 
             HStack {
-                Text(env.preferences.t("移动到", en: "Move to"))
+                Text(env.preferences.t("移动到", en: "Move to", pl: "Przenieś do"))
                     .font(.system(size: 15, weight: .heavy))
                     .foregroundStyle(AppTheme.title)
                 Spacer()
-                Button(env.preferences.t("取消", en: "Cancel")) { dismiss() }
+                Button(env.preferences.t("取消", en: "Cancel", pl: "Anuluj")) { dismiss() }
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(AppTheme.slate)
             }
@@ -993,7 +1083,7 @@ struct MoveNotebookSheet: View {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(AppTheme.secondary)
-                TextField(env.preferences.t("搜索笔记本", en: "Search notebooks"), text: $query)
+                TextField(env.preferences.t("搜索笔记本", en: "Search notebooks", pl: "Szukaj notatników"), text: $query)
                     .font(.system(size: 14))
             }
             .padding(.horizontal, 12)

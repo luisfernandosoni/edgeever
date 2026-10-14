@@ -160,11 +160,11 @@ pub(crate) fn sync_outbox_ack(database: &Connection, params: &Value) -> Result<V
         .get("id")
         .and_then(Value::as_i64)
         .ok_or_else(|| "Missing outbox id".to_owned())?;
-    let (kind, entity_id, current_version): (String, String, i64) = database
+    let (kind, entity_id, payload_json, current_version): (String, String, String, i64) = database
         .query_row(
-            "SELECT kind, entity_id, version FROM _edgeever_sidecar_outbox WHERE id = ?1",
+            "SELECT kind, entity_id, payload_json, version FROM _edgeever_sidecar_outbox WHERE id = ?1",
             [id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
         )
         .map_err(|e| e.to_string())?;
     let requested_version = params.get("version").and_then(Value::as_i64);
@@ -328,7 +328,11 @@ pub(crate) fn sync_outbox_ack(database: &Connection, params: &Value) -> Result<V
                 } else {
                     outbox_entity
                 };
-                database.execute("UPDATE _edgeever_sidecar_outbox SET entity_id = ?1, payload_json = ?2, version = version + 1 WHERE id = ?3", rusqlite::params![next_entity, payload.to_string(), outbox_id]).map_err(|e| e.to_string())?;
+                database.execute("UPDATE _edgeever_sidecar_outbox SET entity_id = ?1, payload_json = ?2, version = version + 1,
+                  status = CASE WHEN status = 'error' AND last_error_code = 'memo_not_found' THEN 'pending' ELSE status END,
+                  retryable = CASE WHEN status = 'error' AND last_error_code = 'memo_not_found' THEN 1 ELSE retryable END,
+                  next_attempt_at = CASE WHEN status = 'error' AND last_error_code = 'memo_not_found' THEN NULL ELSE next_attempt_at END
+                  WHERE id = ?3", rusqlite::params![next_entity, payload.to_string(), outbox_id]).map_err(|e| e.to_string())?;
             }
             if kind == "memo.create" {
                 if let Some((temporary_revision, temporary_content_hash)) =
@@ -352,26 +356,39 @@ pub(crate) fn sync_outbox_ack(database: &Connection, params: &Value) -> Result<V
     if kind == "notebook.create" {
         if let Some(remote) = remote_notebook.as_ref() {
             let remote_id = string_param(remote, "id")?;
-            let remote_exists: bool = database
+            let tx = database
+                .unchecked_transaction()
+                .map_err(|e| e.to_string())?;
+            let remote_exists: bool = tx
                 .query_row(
                     "SELECT EXISTS(SELECT 1 FROM notebooks WHERE id = ?1)",
                     [&remote_id],
                     |row| row.get(0),
                 )
                 .map_err(|e| e.to_string())?;
-            if remote_exists {
-                database
-                    .execute("DELETE FROM notebooks WHERE id = ?1", [&entity_id])
+            if remote_exists && remote_id != entity_id {
+                // The renderer caches the cloud notebook before acknowledging it.
+                // Move notes and children before deleting the local placeholder.
+                tx.execute(
+                    "UPDATE memos SET notebook_id = ?1 WHERE notebook_id = ?2",
+                    rusqlite::params![remote_id, entity_id],
+                )
+                .map_err(|e| e.to_string())?;
+                tx.execute(
+                    "UPDATE notebooks SET parent_id = ?1 WHERE parent_id = ?2",
+                    rusqlite::params![remote_id, entity_id],
+                )
+                .map_err(|e| e.to_string())?;
+                tx.execute("DELETE FROM notebooks WHERE id = ?1", [&entity_id])
                     .map_err(|e| e.to_string())?;
-            } else {
-                database
-                    .execute(
-                        "UPDATE notebooks SET id = ?1 WHERE id = ?2",
-                        rusqlite::params![remote_id, entity_id],
-                    )
-                    .map_err(|e| e.to_string())?;
+            } else if !remote_exists {
+                tx.execute(
+                    "UPDATE notebooks SET id = ?1 WHERE id = ?2",
+                    rusqlite::params![remote_id, entity_id],
+                )
+                .map_err(|e| e.to_string())?;
             }
-            let mut pending = database.prepare("SELECT id, entity_id, payload_json FROM _edgeever_sidecar_outbox WHERE id <> ?1").map_err(|e| e.to_string())?;
+            let mut pending = tx.prepare("SELECT id, entity_id, payload_json FROM _edgeever_sidecar_outbox WHERE id <> ?1").map_err(|e| e.to_string())?;
             let rows: Vec<(i64, String, String)> = pending
                 .query_map([id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
                 .map_err(|e| e.to_string())?
@@ -386,6 +403,9 @@ pub(crate) fn sync_outbox_ack(database: &Connection, params: &Value) -> Result<V
                 if payload.get("notebookId").and_then(Value::as_str) == Some(entity_id.as_str()) {
                     payload["notebookId"] = json!(remote_id);
                 }
+                if payload.get("parentId").and_then(Value::as_str) == Some(entity_id.as_str()) {
+                    payload["parentId"] = json!(remote_id);
+                }
                 if payload.get("temporaryId").and_then(Value::as_str) == Some(entity_id.as_str()) {
                     payload["temporaryId"] = json!(remote_id);
                 }
@@ -394,8 +414,27 @@ pub(crate) fn sync_outbox_ack(database: &Connection, params: &Value) -> Result<V
                 } else {
                     outbox_entity
                 };
-                database.execute("UPDATE _edgeever_sidecar_outbox SET entity_id = ?1, payload_json = ?2, version = version + 1 WHERE id = ?3", rusqlite::params![next_entity, payload.to_string(), outbox_id]).map_err(|e| e.to_string())?;
+                tx.execute("UPDATE _edgeever_sidecar_outbox SET entity_id = ?1, payload_json = ?2, version = version + 1,
+                  status = CASE WHEN status = 'error' AND last_error_code = 'not_found' THEN 'pending' ELSE status END,
+                  retryable = CASE WHEN status = 'error' AND last_error_code = 'not_found' THEN 1 ELSE retryable END,
+                  next_attempt_at = CASE WHEN status = 'error' AND last_error_code = 'not_found' THEN NULL ELSE next_attempt_at END
+                  WHERE id = ?3", rusqlite::params![next_entity, payload.to_string(), outbox_id]).map_err(|e| e.to_string())?;
             }
+            drop(pending);
+            // Commit the remap and acknowledgement together. Otherwise a crash
+            // can leave an already-created notebook queued for another create.
+            let deleted = tx.execute(
+                "DELETE FROM _edgeever_sidecar_outbox WHERE id = ?1 AND (?2 IS NULL OR version = ?2)",
+                rusqlite::params![id, requested_version],
+            ).map_err(|e| e.to_string())?;
+            tx.commit().map_err(|e| e.to_string())?;
+            return Ok(json!({
+                "ok": true,
+                "superseded": deleted == 0,
+                "memo": remote_memo,
+                "notebook": remote_notebook,
+                "template": remote_template
+            }));
         }
     }
     if kind == "template.create" {
@@ -447,18 +486,45 @@ pub(crate) fn sync_outbox_ack(database: &Connection, params: &Value) -> Result<V
             }
         }
     }
+    let tx = database
+        .unchecked_transaction()
+        .map_err(|e| e.to_string())?;
     let deleted = if let Some(version) = requested_version {
-        database
-            .execute(
-                "DELETE FROM _edgeever_sidecar_outbox WHERE id = ?1 AND version = ?2",
-                rusqlite::params![id, version],
-            )
-            .map_err(|e| e.to_string())?
+        tx.execute(
+            "DELETE FROM _edgeever_sidecar_outbox WHERE id = ?1 AND version = ?2",
+            rusqlite::params![id, version],
+        )
+        .map_err(|e| e.to_string())?
     } else {
-        database
-            .execute("DELETE FROM _edgeever_sidecar_outbox WHERE id = ?1", [id])
+        tx.execute("DELETE FROM _edgeever_sidecar_outbox WHERE id = ?1", [id])
             .map_err(|e| e.to_string())?
     };
+    if deleted == 1
+        && matches!(
+            kind.as_str(),
+            "memo.delete" | "memo.deleteBatch" | "memo.emptyTrash"
+        )
+    {
+        let payload: Value = serde_json::from_str(&payload_json).unwrap_or_else(|_| json!({}));
+        let memo_ids: Vec<&str> = if kind == "memo.delete" {
+            vec![entity_id.as_str()]
+        } else {
+            payload
+                .get("memoIds")
+                .and_then(Value::as_array)
+                .map(|ids| ids.iter().filter_map(Value::as_str).collect())
+                .unwrap_or_default()
+        };
+        for memo_id in memo_ids {
+            // Delete only older conflicted edits after the server accepted the
+            // delete. A failed delete must leave its local draft recoverable.
+            tx.execute(
+                "DELETE FROM _edgeever_sidecar_outbox WHERE kind = 'memo.update' AND entity_id = ?1 AND status = 'conflict' AND id < ?2",
+                rusqlite::params![memo_id, id],
+            ).map_err(|e| e.to_string())?;
+        }
+    }
+    tx.commit().map_err(|e| e.to_string())?;
     Ok(
         json!({ "ok": true, "superseded": deleted == 0, "memo": remote_memo, "notebook": remote_notebook, "template": remote_template }),
     )

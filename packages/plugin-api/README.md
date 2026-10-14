@@ -44,6 +44,8 @@ await context.ui.openNote(noteId, { search: "New task" }); // requires ui:naviga
 
 Bulk-indexing plugins can page through `context.notes.queryContent()`. The API also exposes workspace templates, full live-editor reads and range edits, template mutation events, and programmatic opening of a plugin's own registered panels.
 
+Speech plugins can transcribe a note attachment with `context.ai.transcribeResource(noteId, resourceId)`, or pass an audio/video `Blob` or `File` to `context.ai.transcribeMedia(media)`. EdgeEver extracts audio on the client and calls the user's configured speech provider directly. Neither method accepts a media URL or returns the provider credential.
+
 Dashboard and workflow panels can ask EdgeEver to render system chrome (header actions, search, tabs, selects, empty states) through `mount` context `shell.set()`, while the plugin keeps owning the body DOM.
 
 Canvas-style plugins can read and conflict-safely replace resource bytes, open full-screen guarded panels with JSON state, and register constrained block embed renderers:
@@ -59,3 +61,19 @@ await context.resources.update(resource.id, {
 context.editor.embeds.register({ type: "drawing", mount(container, embed) {} });
 await context.editor.insertEmbed({ type: "drawing", resourceId: resource.id, title: "Drawing" });
 ```
+
+Structured notes expose `kind` and full read-only `contentJson` / `contentMarkdown`. Use `context.diagrams.get()` / `edit()` for graph nodes and edges, or `context.tables.get()` / `edit()` for fields, records, and cells. Both require the revision, content hash, and snapshot `editToken` returned by their dedicated read:
+
+```ts
+const snapshot = await context.tables.get(noteId);
+await context.tables.edit(noteId, {
+  expectedRevision: snapshot.note.revision,
+  expectedContentHash: snapshot.note.contentHash,
+  expectedEditToken: snapshot.editToken,
+  operations: [{ op: "update_record", recordId: "row-1", cells: { "field-1": "Updated" } }],
+});
+```
+
+Use `dryRun: true` to preview batches without saving. Schema changes that affect populated cells additionally require `allowDataChanges: true`. Generic Markdown writes to special notes throw `STRUCTURED_NOTE_REQUIRED`; title/tag updates preserve their original body. Use `context.posters.get()` / `edit()` for element patches, layers, groups, and canvas changes, and `context.infographics.get()` / `edit()` for nested data, template, and theme changes. Both expose `capabilities()` and require the same revision/hash/snapshot baseline. Locked poster elements are protected; infographic changes must round-trip through the existing AntV parser without losing unrequested values or styles. See the [structured note guide](../../docs/plugin-development.md#reading-and-editing-structured-notes) for operations, limits, and migration errors.
+
+Plugin writes use transactional local snapshot checks and refuse to reset unresolved sync conflicts. Desktop hosts must support the guarded native save method; older hosts throw `HOST_UPGRADE_REQUIRED` rather than falling back to an unguarded write. Native content, history, and outbox changes commit together. Cloud history retains the existing snapshot interval.

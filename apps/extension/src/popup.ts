@@ -1,44 +1,12 @@
-import "./styles.css";
-import { getSettings, requestInstancePermission } from "./extension";
-import { localizeDocument, t } from "./i18n";
+import { requestInstancePermission, type ExtensionSettings } from "./extension";
+import { t } from "./i18n";
 
-localizeDocument();
-
-const saveButton = document.querySelector<HTMLButtonElement>("#save");
-const settingsButton = document.querySelector<HTMLButtonElement>("#settings");
-const status = document.querySelector<HTMLParagraphElement>("#status");
-
-const setStatus = (message: string, kind: "normal" | "error" | "success" = "normal") => {
-  if (status) {
-    status.textContent = message;
-    status.dataset.kind = kind;
-  }
-};
-
-saveButton?.addEventListener("click", async () => {
-  saveButton.disabled = true;
-  setStatus(t("readingAndSaving"));
-
-  try {
-    const settings = await getSettings();
-    if (!settings.instanceUrl || !settings.token) {
-      throw new Error(t("completePluginConfiguration"));
-    }
-
-    await requestInstancePermission(settings.instanceUrl);
-    const response = await chrome.runtime.sendMessage({ type: "captureCurrentPage" });
-    if (!response?.ok) {
-      throw new Error(response?.message || t("saveFailed"));
-    }
-
-    setStatus(t("savedToEdgeEver"), "success");
-  } catch (error) {
-    setStatus(error instanceof Error ? error.message : t("saveFailed"), "error");
-  } finally {
-    saveButton.disabled = false;
-  }
-});
-
-settingsButton?.addEventListener("click", () => {
-  void chrome.runtime.openOptionsPage();
-});
+// Called directly by the React click handler: request permissions before yielding
+// so Firefox retains the user gesture. UI rendering must never request access.
+export async function captureCurrentPage(settings: ExtensionSettings): Promise<string> {
+  if (!settings.instanceUrl || !settings.token) throw new Error(t("completePluginConfiguration"));
+  await requestInstancePermission(settings.instanceUrl);
+  const response = await chrome.runtime.sendMessage({ type: "captureCurrentPage" });
+  if (!response?.ok) throw new Error(response?.message || t("saveFailed"));
+  return typeof response.message === "string" && response.message ? response.message : t("savedToEdgeEver");
+}

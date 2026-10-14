@@ -3,7 +3,7 @@
     "message": "EdgeEver Web Clipper"
   },
   "extensionDescription": {
-    "message": "表示中のページ、選択した内容、または右クリックした画像を、自分で運用する EdgeEver に保存します。"
+    "message": "ウェブページ、選択した文章、画像、Hacker News の投稿をセルフホストの EdgeEver に保存します。"
   },
   "actionTitle": {
     "message": "EdgeEver に保存"
@@ -11,8 +11,8 @@
   "webClipper": {
     "message": "Web Clipper"
   },
-  "popupDescription": {
-    "message": "表示中のページや選択した内容を取り込みます。選択した文字の右クリックでその文章を、画像の右クリックで画像を、X 上の投稿の右クリックでその投稿を保存できます。"
+  "platformZhihu": {
+    "message": "知乎"
   },
   "saveCurrentPage": {
     "message": "このページを取り込む"
@@ -99,7 +99,7 @@
     "message": "既定のノートブック"
   },
   "autoFirstNotebook": {
-    "message": "接続後、先頭のノートブックを自動で使う"
+    "message": "受信箱"
   },
   "testConnection": {
     "message": "接続をテスト"
@@ -203,10 +203,10 @@
     "message": "（このページから読み取れる本文はありませんでした）"
   },
   "saveSelectionToEdgeEver": {
-    "message": "選択した文字を EdgeEver に保存"
+    "message": "選択したテキストを EdgeEver に保存"
   },
   "selectionSaveHint": {
-    "message": "ページ上の文字を選択して右クリックし、「選択した文字を EdgeEver に保存」を選びます。その文章は、上で選んだ既定のノートブックに 1 件のノートとして保存されます。"
+    "message": "ページ上の文字を選択して右クリックし、「選択したテキストを EdgeEver に保存」を選びます。その文章は、上で選んだ既定のノートブックに 1 件のノートとして保存されます。"
   },
   "savingSelection": {
     "message": "選択した文字を保存しています…"
@@ -280,10 +280,10 @@
     "message": "この保存は終了しています。画像を右クリックしてやり直してください。"
   },
   "saveTweetToEdgeEver": {
-    "message": "この投稿を EdgeEver に保存"
+    "message": "投稿を EdgeEver に保存"
   },
   "tweetSaveHint": {
-    "message": "X で投稿を右クリックし、「この投稿を EdgeEver に保存」を選びます。本文は「さらに表示」で折りたたまれた部分も含めて保存され、表示中の画像とともに、上で選んだ既定のノートブックへ 1 件のノートになります。"
+    "message": "X で投稿を右クリックし、「投稿を EdgeEver に保存」を選びます。本文は「さらに表示」で折りたたまれた部分も含めて保存され、表示中の画像とともに、上で選んだ既定のノートブックへ 1 件のノートになります。"
   },
   "savingTweet": {
     "message": "この投稿を保存しています…"
@@ -316,9 +316,396 @@
     "message": "投稿"
   },
   "tweetSaveWindowTitle": {
-    "message": "この投稿を EdgeEver に保存"
+    "message": "投稿を EdgeEver に保存"
   },
   "tweetTimeLabel": {
     "message": "日時"
+  },
+  "saveGithubRepoToEdgeEver": {
+    "message": "リポジトリ情報を EdgeEver に保存"
+  },
+  "githubRepoSaveHint": {
+    "message": "GitHub のリポジトリページまたはコード一覧で、ページの余白、紹介文、または README 本文を右クリックし、「リポジトリ情報を EdgeEver に保存」を選びます。アドレスと紹介文は、上で選んだ既定のノートブックに 1 件のノートとして保存されます。Issue、ディスカッション、単一ファイルのページは保存しません。"
+  },
+  "savingGithubRepo": {
+    "message": "このリポジトリを保存しています…"
+  },
+  "githubRepoSaved": {
+    "message": "このリポジトリをノートとして保存しました。"
+  },
+  "githubRepoNotPage": {
+    "message": "GitHub のリポジトリページまたはコード一覧ではないため、保存しませんでした。"
+  },
+  "githubRepoUnreadable": {
+    "message": "リポジトリの情報を読み取れなかったため、保存しませんでした。"
+  },
+  "githubRepoHomepageLabel": {
+    "message": "ホームページ"
+  },
+  "githubRepoLanguageLabel": {
+    "message": "言語"
+  },
+  "githubRepoLicenseLabel": {
+    "message": "ライセンス"
+  },
+  "githubRepoTopicsLabel": {
+    "message": "トピック"
+  },
+  "saveXhsToEdgeEver": {
+    "message": "ノートを EdgeEver に保存"
+  },
+  "xhsSaveHint": {
+    "message": "小紅書でノート本文を右クリックし、「ノートを EdgeEver に保存」を選びます。タイトル、本文、画像が 1 件のノートになります。コメントは含めません。画像を右クリックした場合は、その画像だけを保存します。"
+  },
+  "savingXhs": {
+    "message": "このノートを保存しています…"
+  },
+  "xhsSaved": {
+    "message": "このノートを保存しました。"
+  },
+  "xhsNotFound": {
+    "message": "このノートを特定できませんでした。ノートを開いてから、本文を右クリックしてください。"
+  },
+  "xhsNeedsOpen": {
+    "message": "ノートを開いてから、本文を右クリックしてください。"
+  },
+  "xhsPermissionIntro": {
+    "message": "フィードには複数のノートがあります。ポインタの下にあるノートを覚えるには、小紅書へのアクセスを許可してください。許可したあと、同じノートをもう一度右クリックします。選んだノートだけを、クリップ拡張機能の既定ノートブックに保存します。"
+  },
+  "xhsPermissionToast": {
+    "message": "フィードでノートを選ぶには、小紅書へのアクセスを許可してください。そのあと、もう一度右クリックします。"
+  },
+  "xhsRightClickAgain": {
+    "message": "フィードのノートを識別できるようになりました。そのノートをもう一度右クリックしてください。"
+  },
+  "allowXhsAccess": {
+    "message": "小紅書へのアクセスを許可"
+  },
+  "xhsPermissionDenied": {
+    "message": "アクセスは許可されませんでした。ノートをもう一度右クリックしてやり直してください。"
+  },
+  "xhsPermissionReady": {
+    "message": "許可しました。ページに戻り、そのノートをもう一度右クリックしてください。"
+  },
+  "xhsNoteFallbackTitle": {
+    "message": "小紅書のノート"
+  },
+  "xhsSaveWindowTitle": {
+    "message": "ノートを EdgeEver に保存"
+  },
+  "xhsLocationLabel": {
+    "message": "場所"
+  },
+  "saveZhihuToEdgeEver": {
+    "message": "回答・記事を EdgeEver に保存"
+  },
+  "zhihuQuestionLabel": {
+    "message": "質問"
+  },
+  "zhihuArticleLabel": {
+    "message": "記事"
+  },
+  "zhihuAuthorLabel": {
+    "message": "著者："
+  },
+  "zhihuAnswerLabel": {
+    "message": "回答"
+  },
+  "zhihuArticleBodyLabel": {
+    "message": "本文"
+  },
+  "zhihuSaveHint": {
+    "message": "知乎で回答または記事の本文を右クリックし、「回答・記事を EdgeEver に保存」を選びます。タイトル、著者、本文、画像が 1 件のノートになります。コメントは含めません。画像を右クリックした場合は、その画像だけを保存します。"
+  },
+  "savingZhihu": {
+    "message": "この知乎の回答または記事を保存しています…"
+  },
+  "zhihuSaved": {
+    "message": "この知乎の回答または記事を保存しました。"
+  },
+  "zhihuNotFound": {
+    "message": "この回答または記事を特定できませんでした。本文を右クリックしてください。"
+  },
+  "zhihuUnreadable": {
+    "message": "この回答または記事の本文を読めなかったため、保存しませんでした。"
+  },
+  "zhihuPermissionIntro": {
+    "message": "ページには複数の回答や記事があります。ポインタの下にある一篇を覚えるには、知乎へのアクセスを許可してください。許可したあと、同じ本文をもう一度右クリックします。選んだ一篇だけを、クリップ拡張機能の既定ノートブックに保存します。"
+  },
+  "zhihuPermissionToast": {
+    "message": "一覧で回答または記事を選ぶには、知乎へのアクセスを許可してください。そのあと、もう一度右クリックします。"
+  },
+  "zhihuRightClickAgain": {
+    "message": "ページ上の回答と記事を識別できるようになりました。その本文をもう一度右クリックしてください。"
+  },
+  "allowZhihuAccess": {
+    "message": "知乎へのアクセスを許可"
+  },
+  "zhihuPermissionDenied": {
+    "message": "アクセスは許可されませんでした。本文をもう一度右クリックしてやり直してください。"
+  },
+  "zhihuPermissionReady": {
+    "message": "許可しました。ページに戻り、その本文をもう一度右クリックしてください。"
+  },
+  "zhihuNoteFallbackTitle": {
+    "message": "知乎の回答または記事"
+  },
+  "zhihuSaveWindowTitle": {
+    "message": "回答・記事を EdgeEver に保存"
+  },
+  "saveRedditToEdgeEver": {
+    "message": "Reddit の投稿を EdgeEver に保存"
+  },
+  "savingReddit": {
+    "message": "Reddit の投稿を保存しています…"
+  },
+  "redditSaved": {
+    "message": "Reddit の投稿をノートに保存しました。"
+  },
+  "redditNotFound": {
+    "message": "Reddit の投稿が見つかりません。投稿の上で右クリックしてください。"
+  },
+  "redditRightClickAgain": {
+    "message": "Reddit の投稿を認識できるようになりました。同じ投稿をもう一度右クリックしてください。"
+  },
+  "redditAuthorLabel": {
+    "message": "投稿者"
+  },
+  "redditCommunityLabel": {
+    "message": "コミュニティ"
+  },
+  "redditLinkLabel": {
+    "message": "外部リンク"
+  },
+  "saveVideoNoteToEdgeEver": {
+    "message": "動画ノートを EdgeEver に保存"
+  },
+  "savingVideoNote": {
+    "message": "動画ノートを保存しています…"
+  },
+  "videoNoteSaved": {
+    "message": "動画ノートを保存しました。"
+  },
+  "videoTranscriptSaved": {
+    "message": "字幕を保存しました。要約は生成されていません。"
+  },
+  "videoTranscriptNeedScope": {
+    "message": "字幕を保存しました。要約は生成されていません。設定でトークンに ai:generate を追加し、既定のモデルを選んでください。"
+  },
+  "videoTranscriptNeedModel": {
+    "message": "字幕を保存しました。要約は生成されていません。先に既定のモデルを選んでください。"
+  },
+  "videoTranscriptTooLong": {
+    "message": "字幕を保存しました。この動画は長すぎるため、要約は生成されていません。"
+  },
+  "videoInfoSaved": {
+    "message": "動画情報を保存しました。"
+  },
+  "videoPageUnsupported": {
+    "message": "このページにはまだ対応していません。"
+  },
+  "videoNotRead": {
+    "message": "この動画を読み取れませんでした。"
+  },
+  "videoSourceLabel": {
+    "message": "出典"
+  },
+  "videoPlatformLabel": {
+    "message": "プラットフォーム"
+  },
+  "videoCaptionsLabel": {
+    "message": "字幕"
+  },
+  "videoCapturedAtLabel": {
+    "message": "保存日"
+  },
+  "videoSummaryHeading": {
+    "message": "要約"
+  },
+  "videoOutlineHeading": {
+    "message": "章立て"
+  },
+  "videoTakeawaysHeading": {
+    "message": "要点"
+  },
+  "videoTranscriptHeading": {
+    "message": "字幕全文"
+  },
+  "videoCoverAlt": {
+    "message": "カバー"
+  },
+  "videoPlatformYouTube": {
+    "message": "YouTube"
+  },
+  "videoPlatformBilibili": {
+    "message": "ビリビリ"
+  },
+  "videoCaptionsAuto": {
+    "message": "自動字幕"
+  },
+  "videoCaptionsCreator": {
+    "message": "投稿者の字幕"
+  },
+  "videoNoCaptions": {
+    "message": "この動画には使える字幕がありません。"
+  },
+  "videoNoteFallbackTitle": {
+    "message": "動画ノート"
+  },
+  "saveHackerNewsToEdgeEver": {
+    "message": "Hacker News の投稿を EdgeEver に保存"
+  },
+  "saveV2exToEdgeEver": {
+    "message": "V2EX のトピックを EdgeEver に保存"
+  },
+  "saveXiaoyuzhouToEdgeEver": {
+    "message": "小宇宙のエピソードを EdgeEver に保存"
+  },
+  "savingPlatformClip": {
+    "message": "このページを EdgeEver に保存中…"
+  },
+  "platformNotDetail": {
+    "message": "対応する投稿、トピック、エピソードの詳細ページを開いて、もう一度お試しください。"
+  },
+  "platformUnreadable": {
+    "message": "内容を読み取れません。必要に応じてログインし、詳細ページの読み込み後にもう一度お試しください。"
+  },
+  "platformPageChanged": {
+    "message": "保存中にページが切り替わりました。保存は行われていません。目的の詳細ページで再試行してください。"
+  },
+  "platformIncomplete": {
+    "message": "内容の全文を読み取れませんでした。保存は行われていません。全文を展開し、画像の読み込みを待ってから再試行してください。"
+  },
+  "platformImagesPartial": {
+    "message": "本文を保存しました。一部の画像は外部リンクのままです。"
+  },
+  "platformSavedWithImages": {
+    "message": "すべての画像とともに EdgeEver に保存しました。"
+  },
+  "platformNoShowNotes": {
+    "message": "このエピソードには Show Notes がありません。"
+  },
+  "platformAuthorLabel": {
+    "message": "投稿者"
+  },
+  "platformPublishedAtLabel": {
+    "message": "公開日時"
+  },
+  "platformRelativeTimeLabel": {
+    "message": "ページの表示どおりの相対時刻"
+  },
+  "platformScoreLabel": {
+    "message": "保存時のポイント"
+  },
+  "platformExternalLinkLabel": {
+    "message": "元の外部リンク"
+  },
+  "platformSupplementLabel": {
+    "message": "追記"
+  },
+  "platformPodcastLabel": {
+    "message": "番組"
+  },
+  "saveFacebookToEdgeEver": {
+    "message": "Facebook の投稿を EdgeEver に保存"
+  },
+  "saveInstagramToEdgeEver": {
+    "message": "Instagram の投稿を EdgeEver に保存"
+  },
+  "saveLinkedinToEdgeEver": {
+    "message": "LinkedIn の投稿を EdgeEver に保存"
+  },
+  "saveThreadsToEdgeEver": {
+    "message": "Threads の投稿を EdgeEver に保存"
+  },
+  "saveBlueskyToEdgeEver": {
+    "message": "Bluesky の投稿を EdgeEver に保存"
+  },
+  "socialSelectPost": {
+    "message": "投稿の詳細ページを開くか、対象の投稿をもう一度右クリックして保存してください。"
+  },
+  "checkingPageCapture": {
+    "message": "確認中"
+  },
+  "pageCaptureAdapted": {
+    "message": "対応済み"
+  },
+  "pageCaptureGeneric": {
+    "message": "汎用収集"
+  },
+  "pageCaptureSelectPost": {
+    "message": "投稿・文字を選択"
+  },
+  "pageCaptureUnavailable": {
+    "message": "保存不可"
+  },
+  "pageCaptureUnknown": {
+    "message": "未確認"
+  },
+  "platformXiaoyuzhou": {
+    "message": "Xiaoyuzhou"
+  },
+  "saveSubstackNoteToEdgeEver": {
+    "message": "Substack Note を EdgeEver に保存"
+  },
+  "adaptedPlatformsTitle": {
+    "message": "専用対応プラットフォーム"
+  },
+  "platformXiaohongshu": {
+    "message": "小紅書"
+  },
+  "platformBilibili": {
+    "message": "Bilibili"
+  },
+  "platformPosts": {
+    "message": "投稿"
+  },
+  "platformNotes": {
+    "message": "ノート・画像"
+  },
+  "platformAnswersArticles": {
+    "message": "回答・記事"
+  },
+  "platformRepositories": {
+    "message": "リポジトリ情報"
+  },
+  "platformCaptionsImages": {
+    "message": "キャプション・画像"
+  },
+  "platformMainPosts": {
+    "message": "メイン投稿"
+  },
+  "platformTopics": {
+    "message": "トピック・追記"
+  },
+  "platformShowNotes": {
+    "message": "エピソードの Show Notes"
+  },
+  "platformArticles": {
+    "message": "記事"
+  },
+  "platformArticlesNotes": {
+    "message": "記事・Notes"
+  },
+  "platformVideoCaptions": {
+    "message": "動画の字幕"
+  },
+  "viewDiagnostics": {
+    "message": "診断情報を表示"
+  },
+  "socialPlatformsTitle": {
+    "message": "ソーシャル投稿"
+  },
+  "readingPlatformsTitle": {
+    "message": "記事・コミュニティ"
+  },
+  "mediaPlatformsTitle": {
+    "message": "動画・ポッドキャスト"
+  },
+  "closeNotification": {
+    "message": "通知を閉じる"
+  },
+  "clipNotifications": {
+    "message": "クリップの通知"
   }
 }

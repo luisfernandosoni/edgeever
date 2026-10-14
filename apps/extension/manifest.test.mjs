@@ -1,3 +1,4 @@
+import { readdirSync, readFileSync } from "node:fs";
 import { describe, expect, test } from "bun:test";
 import extensionPackage from "./package.json";
 import {
@@ -31,6 +32,55 @@ describe("extension manifests", () => {
           js: ["assets/tweet-target.js"],
           run_at: "document_start",
         },
+        {
+          matches: [
+            "https://www.xiaohongshu.com/*",
+            "https://xiaohongshu.com/*",
+          ],
+          js: ["assets/xhs-target.js"],
+          run_at: "document_start",
+        },
+        {
+          matches: [
+            "https://www.zhihu.com/*",
+            "https://zhihu.com/*",
+            "https://zhuanlan.zhihu.com/*",
+            "https://www.zhuanlan.zhihu.com/*",
+          ],
+          js: ["assets/zhihu-target.js"],
+          run_at: "document_start",
+        },
+        {
+          matches: [
+            "https://reddit.com/*",
+            "https://www.reddit.com/*",
+            "https://old.reddit.com/*",
+            "https://new.reddit.com/*",
+            "https://sh.reddit.com/*",
+          ],
+          js: ["assets/reddit-target.js"],
+          run_at: "document_start",
+        },
+        {
+          "matches": [
+                    "https://www.facebook.com/*",
+                    "https://facebook.com/*",
+                    "https://m.facebook.com/*",
+                    "https://www.instagram.com/*",
+                    "https://instagram.com/*",
+                    "https://www.linkedin.com/*",
+                    "https://linkedin.com/*",
+                    "https://www.threads.com/*",
+                    "https://threads.com/*",
+                    "https://www.threads.net/*",
+                    "https://threads.net/*",
+                    "https://bsky.app/*"
+          ],
+          "js": [
+                    "assets/social-target.js"
+          ],
+          "run_at": "document_start"
+},
       ]);
     }
   });
@@ -66,5 +116,21 @@ describe("extension manifests", () => {
         strict_min_version: FIREFOX_ANDROID_MIN_VERSION,
       },
     });
+  });
+});
+
+describe("extension locales", () => {
+  const localesDirectory = new URL("./public/_locales/", import.meta.url);
+  const messages = (locale) => JSON.parse(readFileSync(new URL(`${locale}/messages.json`, localesDirectory), "utf8"));
+
+  test("every locale ships the same message keys as English", () => {
+    // A missing key silently falls back to English in the browser, so a new
+    // feature must add its phrases to every locale.
+    const english = Object.keys(messages("en")).sort();
+    const locales = readdirSync(localesDirectory).filter((locale) => locale !== "en");
+    expect(locales.length).toBeGreaterThan(0);
+    for (const locale of locales) {
+      expect({ locale, keys: Object.keys(messages(locale)).sort() }).toEqual({ locale, keys: english });
+    }
   });
 });

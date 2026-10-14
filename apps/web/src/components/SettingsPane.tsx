@@ -1,4 +1,5 @@
 import {
+  AudioLines,
   ChevronLeft,
   ChevronRight,
   Database,
@@ -6,6 +7,7 @@ import {
   Keyboard,
   KeyRound,
   LayoutTemplate,
+  Share2,
   Shield,
   SlidersHorizontal,
   Sparkles,
@@ -13,13 +15,13 @@ import {
   Users,
   Wrench,
 } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import { useSearchParams } from "react-router";
 import * as m from "motion/react-m";
 import { Button } from "@/components/ui/button";
 
 import type { ShortcutSettings } from "@/lib/app-helpers";
-import type { EditorContentWidth } from "@/lib/editor-content-width";
 import type { NoteProsePatch, ResolvedNoteProse } from "@edgeever/shared";
 import { BETA_BADGE_CLASSNAME, WORKSPACE_PAGE_TITLE_CLASSNAME } from "@/lib/workspace-ui";
 import { cn } from "@/lib/utils";
@@ -27,6 +29,7 @@ import { AccountInfoCard } from "./settings/AccountInfoCard";
 import { DataExportCard } from "./settings/DataExportCard";
 import { DesktopLocalDataCard } from "./settings/DesktopLocalDataCard";
 import { LoginDevicesCard } from "./settings/LoginDevicesCard";
+import { ShareManagementCard } from "./settings/ShareManagementCard";
 import { EvernoteImportGuideCard } from "./settings/EvernoteImportGuideCard";
 import { FeedbackLink } from "./settings/FeedbackLink";
 import { SystemInfoPanel } from "./settings/SystemInfoPanel";
@@ -37,6 +40,7 @@ import { PasswordCard } from "./settings/PasswordCard";
 import { UserManagementCard } from "./settings/UserManagementCard";
 import { ObjectStorageCard } from "./settings/ObjectStorageCard";
 import { AiModelCard } from "./settings/AiModelCard";
+import { SpeechTranscriptionCard } from "./settings/SpeechTranscriptionCard";
 import { DesktopAcpAgentCard } from "./settings/DesktopAcpAgentCard";
 import { ThemeToggle } from "./ThemeToggle";
 import type { AuthUser } from "@edgeever/shared";
@@ -52,8 +56,6 @@ interface SettingsPaneProps {
   onImageCompressionChange: (enabled: boolean) => void;
   shortcutSettings: ShortcutSettings;
   onShortcutSettingsChange: (settings: ShortcutSettings) => void;
-  editorContentWidth: EditorContentWidth;
-  onEditorContentWidthChange: (width: EditorContentWidth) => void;
   noteProse: ResolvedNoteProse;
   onNoteProseChange: (patch: NoteProsePatch) => void;
   onLogout: () => void;
@@ -64,6 +66,7 @@ interface SettingsPaneProps {
   user: AuthUser | null;
   refreshWorkspaceAfterImport: () => Promise<void>;
   onOpenExecutionCenter: () => void;
+  onOpenMemo: (memoId: string, notebookId: string) => void;
 }
 
 // Slate and brand color variables already switch values with the root theme.
@@ -73,7 +76,7 @@ const SettingsGroup = ({ children }: { children: ReactNode }) => (
   </div>
 );
 
-type TabKey = "general" | "shortcuts" | "users" | "data" | "ai" | "mcp" | "advanced" | "account" | "system";
+type TabKey = "general" | "shortcuts" | "users" | "data" | "ai" | "mcp" | "speech" | "sharing" | "advanced" | "account" | "system";
 
 interface TabItem {
   key: TabKey;
@@ -90,8 +93,6 @@ export const SettingsPane = ({
   onImageCompressionChange,
   shortcutSettings,
   onShortcutSettingsChange,
-  editorContentWidth,
-  onEditorContentWidthChange,
   noteProse,
   onNoteProseChange,
   onLogout,
@@ -102,10 +103,12 @@ export const SettingsPane = ({
   user,
   refreshWorkspaceAfterImport,
   onOpenExecutionCenter,
+  onOpenMemo,
 }: SettingsPaneProps) => {
   const { t } = useTranslation();
-  const [activeTab, setActiveTab] = useState<TabKey>("general");
-  const [activeMobileTab, setActiveMobileTab] = useState<TabKey | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedTab = searchParams.get("tab");
+  const selectTab = (tab: TabKey | null) => setSearchParams(tab ? { tab } : {}, { replace: true });
   const { unseen: deployedUpdateUnseen } = useDeployedUpdateNotice();
   const canClearLocalData = Boolean(window.edgeeverDesktop?.canClearLocalData);
 
@@ -131,9 +134,19 @@ export const SettingsPane = ({
       icon: KeyRound,
     },
     {
+      key: "speech",
+      label: t("settings.tabs.speech"),
+      icon: AudioLines,
+    },
+    {
       key: "data",
       label: t("settings.tabs.data"),
       icon: Database,
+    },
+    {
+      key: "sharing",
+      label: t("sharing.managementTitle"),
+      icon: Share2,
     },
     ...(isOwner
       ? [
@@ -165,11 +178,15 @@ export const SettingsPane = ({
     },
   ];
 
+  const selectedTab = tabItems.find((item) => item.key === requestedTab)?.key ?? null;
+  const activeTab = selectedTab ?? "general";
+  const activeMobileTab = selectedTab;
+
   const mobileTabItems = tabItems.filter((item) => item.key !== "shortcuts");
 
   const handleBack = () => {
-    if (activeMobileTab !== null) {
-      setActiveMobileTab(null);
+    if (window.matchMedia("(max-width: 1023px)").matches && activeMobileTab !== null) {
+      selectTab(null);
     } else {
       onClose();
     }
@@ -199,8 +216,6 @@ export const SettingsPane = ({
             <PreferenceCard
               imageCompressionEnabled={imageCompressionEnabled}
               onImageCompressionChange={onImageCompressionChange}
-              editorContentWidth={editorContentWidth}
-              onEditorContentWidthChange={onEditorContentWidthChange}
               noteProse={noteProse}
               onNoteProseChange={onNoteProseChange}
             />
@@ -229,11 +244,19 @@ export const SettingsPane = ({
             <EvernoteImportGuideCard />
           </SettingsGroup>
         );
+      case "sharing":
+        return <ShareManagementCard userId={user?.id ?? null} onOpenMemo={onOpenMemo} />;
       case "ai":
         return (
           <SettingsGroup>
             <DesktopAcpAgentCard />
             <AiModelCard />
+          </SettingsGroup>
+        );
+      case "speech":
+        return (
+          <SettingsGroup>
+            <SpeechTranscriptionCard demoMode={demoMode} />
           </SettingsGroup>
         );
       case "mcp":
@@ -309,7 +332,7 @@ export const SettingsPane = ({
                 <button
                   key={item.key}
                   type="button"
-                  onClick={() => setActiveTab(item.key)}
+                  onClick={() => selectTab(item.key)}
                   className={cn(
                     "flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs leading-5 transition-all duration-150 text-left w-full",
                     isSelected
@@ -387,7 +410,7 @@ export const SettingsPane = ({
                     <button
                       key={item.key}
                       type="button"
-                      onClick={() => setActiveMobileTab(item.key)}
+                      onClick={() => selectTab(item.key)}
                       className="flex w-full items-center justify-between gap-4 p-4 text-left transition-colors hover:bg-slate-50/50"
                     >
                       <div className="flex items-center gap-3">

@@ -46,7 +46,7 @@ import {
 } from "./backup-service";
 import { sha256, sha256Bytes } from "./hash-utils";
 import { INSTANCE_BUILD_ID } from "./instance-build";
-import { resolveInstanceDeploymentMetadata } from "./instance-deployment";
+import { resolveDeploymentVersionCreatedAt, resolveInstanceDeploymentMetadata } from "./instance-deployment";
 import type {
   DatabaseAdapter,
   PreparedStatementAdapter,
@@ -58,6 +58,7 @@ import {
   apiError,
   authNotConfigured,
   databaseNotReady,
+  httpExceptionError,
   unauthorized,
 } from "./http-errors";
 import { audit } from "./audit";
@@ -88,6 +89,7 @@ import {
   uploadResourcePart,
 } from "./resource-upload-service";
 import { registerPluginDistributionRoutes } from "./plugin-distribution-routes";
+import { registerPosterRenderRoutes } from "./poster-render-routes";
 import { registerSyncRoutes } from "./sync-routes";
 import { registerMemoRoutes } from "./memo-routes";
 import { registerScheduledTaskRoutes } from "./scheduled-task-routes";
@@ -123,6 +125,7 @@ import {
   registerUserRoutes,
 } from "./user-routes";
 import { registerNotebookRoutes } from "./notebook-routes";
+import { registerNotebookShareRoutes, registerPublicNotebookShareRoutes } from "./notebook-share-routes";
 import { registerMemoShareRoutes, registerPublicShareRoutes } from "./share-routes";
 import { registerPublicTableFormRoutes, registerTableFormRoutes } from "./table-form-routes";
 import {
@@ -234,6 +237,7 @@ app.get("/api/health", async (c) => {
     authMode,
     build: INSTANCE_BUILD_ID.slice(0, 12),
     deployment: resolveInstanceDeploymentMetadata(c.env),
+    deploymentVersionCreatedAt: resolveDeploymentVersionCreatedAt(c.env),
     migration: await getAppliedMigration(c.env),
     storage: {
       database: c.env.storage.diagnostics.database,
@@ -247,6 +251,7 @@ app.get("/api/health", async (c) => {
 app.get("/api/openapi.json", (c) => c.json(apiProbe));
 
 registerPublicShareRoutes(app);
+registerPublicNotebookShareRoutes(app);
 registerPublicTableFormRoutes(app);
 
 registerAuthRoutes(app, {
@@ -373,10 +378,12 @@ registerSyncRoutes(app, {
   mapMemoDetail: (...args) => mapMemoDetail(...args),
 });
 registerTagRoutes(app);
+registerPosterRenderRoutes(app);
 registerPluginDistributionRoutes(app);
 registerScheduledTaskRoutes(app);
 registerWorkspaceExtensionRoutes(app, { isDemoMode: (...args) => isDemoMode(...args) });
 registerMemoShareRoutes(app);
+registerNotebookShareRoutes(app);
 registerTableFormRoutes(app);
 registerTemplateRoutes(app, {
   createMemoRecord: (...args) => createMemoRecord(...args),
@@ -485,6 +492,7 @@ const worker = {
     return fetchEdgeEverApp(request, {
       ...env,
       storage: createCloudflareStorageAdapter(env),
+      deploymentVersionCreatedAt: env.CF_VERSION_METADATA?.timestamp,
       // workerd's default Internet egress checks resolved addresses against its public-only network policy.
       publicNetworkFetch: (url, init) => fetch(url, init),
     }, ctx);
@@ -519,6 +527,9 @@ app.onError((error, c) => {
   if (error instanceof AppError) {
     return apiError(c, error.code, error.message, error.status);
   }
+
+  const requestError = httpExceptionError(c, error);
+  if (requestError) return requestError;
 
   if (isDatabaseNotReadyError(error)) {
     console.error("EdgeEver database readiness check failed", error);

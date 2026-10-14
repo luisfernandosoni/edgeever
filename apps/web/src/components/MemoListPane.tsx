@@ -11,6 +11,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
@@ -44,6 +45,7 @@ import {
   TagX,
   Image as ImageIcon,
   Share2,
+  Globe,
   FileDown,
   FileCode2,
   FileUp,
@@ -82,6 +84,7 @@ import type {
 } from "@/lib/app-helpers";
 import { contentEnterMotion, paneEnterMotion } from "@/lib/motion";
 import type { SyncQueueSummary } from "@/lib/sync-queue";
+import { api } from "@/lib/api";
 import { isLocalMemoId } from "@/lib/local-mirror";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import {
@@ -516,6 +519,17 @@ export const MemoListPane = ({
 }) => {
   const { t } = useTranslation();
   const [memoContextMenu, setMemoContextMenu] = useState<MemoContextMenuState | null>(null);
+  const contextShareMemoId = memoContextMenu?.memo.id;
+  const contextShareQuery = useQuery({
+    queryKey: ["memo-share", contextShareMemoId ?? ""],
+    queryFn: () => {
+      if (!contextShareMemoId) throw new Error("Memo share query requires a memo id");
+      return api.getMemoShare(contextShareMemoId);
+    },
+    enabled: Boolean(contextShareMemoId && !isLocalMemoId(contextShareMemoId)),
+    retry: false,
+    staleTime: 30_000,
+  });
   const [listDensity, setListDensity] = useState<MemoListDensity>(() => readMemoListDensityPreference());
   const [lastSelectedMemoId, setLastSelectedMemoId] = useState<string | null>(null);
   const [moveTargetNotebookId, setMoveTargetNotebookId] = useState("");
@@ -672,7 +686,7 @@ export const MemoListPane = ({
 
   const handleCopyContextMemoToWeChat = async () => {
     const memo = memoContextMenu?.memo;
-    if (!memo || memo.diagramKind || memo.structuredTable || memo.infographic || wechatCopyPendingRef.current) return;
+    if (!memo || memo.diagramKind || memo.structuredTable || memo.infographic || memo.poster || wechatCopyPendingRef.current) return;
     setMemoContextMenu(null);
     wechatCopyPendingRef.current = true;
     if (wechatCopyNoticeTimerRef.current !== null) {
@@ -1670,10 +1684,10 @@ export const MemoListPane = ({
                     disabled={isLocalMemoId(memoContextMenu.memo.id)}
                     onClick={() => requestContextDocumentAction("share")}
                   >
-                    <Share2 className="h-4 w-4 text-slate-500" />
-                    {t(isLocalMemoId(memoContextMenu.memo.id) ? "sharing.afterSync" : "sharing.action")}
+                    {contextShareQuery.data?.share ? <Globe className="h-4 w-4 text-slate-950" /> : <Share2 className="h-4 w-4 text-slate-500" />}
+                    {t(isLocalMemoId(memoContextMenu.memo.id) ? "sharing.afterSync" : contextShareQuery.data?.share ? "sharing.manage" : "sharing.action")}
                   </DropdownMenuItem>
-                  {!memoContextMenu.memo.diagramKind && !memoContextMenu.memo.structuredTable && !memoContextMenu.memo.infographic && (
+                  {!memoContextMenu.memo.diagramKind && !memoContextMenu.memo.structuredTable && !memoContextMenu.memo.infographic && !memoContextMenu.memo.poster && (
                     <DropdownMenuItem
                       className="flex h-9 w-full items-center gap-2 px-3 text-left text-xs text-slate-700 hover:bg-slate-50 cursor-pointer outline-none"
                       onClick={() => void handleCopyContextMemoToWeChat()}

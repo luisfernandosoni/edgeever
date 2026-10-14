@@ -38,6 +38,7 @@ export * from "./deployment-metadata";
 export * from "./diagram";
 export * from "./diagram-canvas";
 export * from "./infographic";
+export * from "./infographic-syntax";
 export * from "./table";
 export * from "./diagram-palette";
 export * from "./diagram-flowchart-style";
@@ -59,3 +60,17 @@ export {
 } from "./diagram-reader";
 
 export { attachDiagramScroll } from "./diagram-scroll";
+export * from "./front-matter";
+
+export * from "./poster";
+
+export * from "./poster-fonts";
+export * from "./poster-platforms";
+export * from "./poster-design-catalog";
+
+export * from "./structured-note-error";
+export * from "./diagram-operations";
+export * from "./table-operations";
+export * from "./poster-content-layout";
+export * from "./poster-operations";
+export * from "./infographic-operations";

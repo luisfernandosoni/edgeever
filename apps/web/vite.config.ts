@@ -124,6 +124,11 @@ self.addEventListener("activate", (event) => {
 
 export default defineConfig({
   root: "apps/web",
+  // Poster creation loads Fabric through a lazy module. Prepare it at startup
+  // so the first poster does not trigger dependency optimization mid-session.
+  optimizeDeps: {
+    include: ["fabric"],
+  },
   // Packaged Electron apps load index.html via file://, so root-absolute
   // asset URLs resolve to the filesystem root and leave a blank window.
   base: isDesktopBuild ? "./" : "/",
@@ -215,7 +220,7 @@ export default defineConfig({
             },
           },
           {
-            urlPattern: ({ url }) => /\/assets\/i18n-ja-/.test(url.pathname),
+            urlPattern: ({ url }) => /\/assets\/i18n-(?:ja|pl)-/.test(url.pathname),
             handler: "CacheFirst",
             options: {
               cacheName: "edgeever-optional-locales",
@@ -284,7 +289,7 @@ export default defineConfig({
       ? false
       : {
           resolveDependencies: (_filename, dependencies) => dependencies.filter((dependency) =>
-            !/(?:vendor-code-highlight|vendor-(?:mermaid|D3|tiptap|prosemirror|floating|codemirror|x6|infographic|zod|streamdown)|vendor~(?:wasm|emacs-lisp)-|vendor-radix(?!-slot)|ui-primitives|ui-button-tooltip|i18n-ja-)/.test(dependency),
+            !/(?:vendor-code-highlight|vendor-(?:mermaid|D3|tiptap|prosemirror|floating|codemirror|x6|infographic|zod|streamdown)|vendor~(?:wasm|emacs-lisp)-|vendor-radix(?!-slot)|ui-primitives|ui-button-tooltip|i18n-(?:ja|pl)-)/.test(dependency),
           ),
         },
     rolldownOptions: {
@@ -302,6 +307,8 @@ export default defineConfig({
           : {}),
       },
       output: {
+        // Preserve initialization order when manual vendor groups form cycles.
+        strictExecutionOrder: true,
         codeSplitting: {
           groups: [
             {
@@ -319,6 +326,11 @@ export default defineConfig({
             {
               name: "i18n-ja",
               test: /[\\/]i18n[\\/](?:resources[\\/])?ja\.ts$/,
+              priority: 41,
+            },
+            {
+              name: "i18n-pl",
+              test: /[\\/]i18n[\\/](?:resources[\\/])?pl\.ts$/,
               priority: 41,
             },
             {

@@ -1,9 +1,13 @@
-import { AlignHorizontalJustifyCenter, AlignVerticalSpaceAround, AppWindow, BookOpenText, ChartNoAxesCombined, Code2, Image, Keyboard, Languages, MousePointerClick, Palette, Sparkles, SunMoon, Type } from "lucide-react";
+import { AlignVerticalSpaceAround, AppWindow, BookOpenText, ChartNoAxesCombined, Code2, Image, Keyboard, Languages, ListTree, MousePointerClick, Palette, Sparkles, SpellCheck, SunMoon, Type } from "lucide-react";
 import { useState, useEffect, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import type { EditorContentWidth } from "@/lib/editor-content-width";
 import type { NoteProsePatch, NoteProsePaletteChoice, ResolvedNoteProse } from "@edgeever/shared";
 import { DEFAULT_NOTE_PROSE_CSS, MAX_NOTE_PROSE_CSS_BYTES, NOTE_PROSE_FONT_SIZES, NOTE_PROSE_PALETTE_CHOICES, NOTE_PROSE_PALETTES, noteProseCssDropsDeclarations } from "@edgeever/shared";
+import {
+  EDITOR_SPELLCHECK_CHANGED_EVENT,
+  readEditorSpellcheckPreference,
+  writeEditorSpellcheckPreference,
+} from "@/lib/editor-spellcheck-preference";
 import {
   EDITOR_LINK_OPEN_MODE_CHANGED_EVENT,
   getStoredEditorLinkOpenMode,
@@ -23,7 +27,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { SETTINGS_ITEM_TITLE_CLASSNAME } from "./settings-ui";
+import { SETTINGS_ITEM_DESCRIPTION_CLASSNAME, SETTINGS_ITEM_ICON_CLASSNAME, SETTINGS_ITEM_TITLE_CLASSNAME } from "./settings-ui";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -44,6 +48,8 @@ import {
 } from "@/lib/editor-body-font";
 import { applyUiFontPreference, readUiFontPreference, writeUiFontPreference } from "@/lib/ui-font";
 import { syncPublishedNoteBodyFont } from "@/lib/published-note-body-font";
+import { useShowDescendantNotesPreference, writeShowDescendantNotesPreference } from "@/lib/descendant-notes-preference";
+import { PicGoSettingsItem } from "./PicGoSettingsItem";
 import { NoteProseCssEditor } from "./NoteProseCssEditor";
 import { NoteProseCssPreview } from "./NoteProseCssPreview";
 
@@ -195,8 +201,6 @@ const NOTE_PROSE_LINE_HEIGHT_OPTIONS = [
 interface PreferenceCardProps {
   imageCompressionEnabled: boolean;
   onImageCompressionChange: (enabled: boolean) => void;
-  editorContentWidth: EditorContentWidth;
-  onEditorContentWidthChange: (width: EditorContentWidth) => void;
   noteProse: ResolvedNoteProse;
   onNoteProseChange: (patch: NoteProsePatch) => void;
 }
@@ -204,12 +208,11 @@ interface PreferenceCardProps {
 export const PreferenceCard = ({
   imageCompressionEnabled,
   onImageCompressionChange,
-  editorContentWidth,
-  onEditorContentWidthChange,
   noteProse,
   onNoteProseChange,
 }: PreferenceCardProps) => {
   const { t } = useTranslation();
+  const showDescendantNotes = useShowDescendantNotesPreference();
   const { preference: appearancePreference, resolvedTheme, setPreference: setAppearancePreference } = useAppearanceTheme();
   const { mermaidThemePreference, setMermaidTheme } = useMermaidTheme();
   const [cssDialogOpen, setCssDialogOpen] = useState(false);
@@ -219,6 +222,7 @@ export const PreferenceCard = ({
   const [linkOpenMode, setLinkOpenMode] = useState<EditorLinkOpenMode>(() => getStoredEditorLinkOpenMode());
   const [aiSelectionMenuEnabled, setAiSelectionMenuEnabled] = useState(readAiSelectionMenuPreference);
   const [aiSpaceShortcutEnabled, setAiSpaceShortcutEnabled] = useState(readAiSpaceShortcutPreference);
+  const [spellcheckEnabled, setSpellcheckEnabled] = useState(readEditorSpellcheckPreference);
   const [editorBodyFont, setEditorBodyFont] = useState(readEditorBodyFontPreference);
   const [uiFont, setUiFont] = useState(readUiFontPreference);
 
@@ -236,6 +240,24 @@ export const PreferenceCard = ({
     window.addEventListener("storage", syncPreference);
     return () => {
       window.removeEventListener(AI_SPACE_SHORTCUT_CHANGED_EVENT, onPreferenceChanged);
+      window.removeEventListener("storage", syncPreference);
+    };
+  }, []);
+
+  useEffect(() => {
+    const syncPreference = () => setSpellcheckEnabled(readEditorSpellcheckPreference());
+    const onPreferenceChanged = (event: Event) => {
+      const detail = (event as CustomEvent<boolean>).detail;
+      if (typeof detail === "boolean") {
+        setSpellcheckEnabled(detail);
+        return;
+      }
+      syncPreference();
+    };
+    window.addEventListener(EDITOR_SPELLCHECK_CHANGED_EVENT, onPreferenceChanged);
+    window.addEventListener("storage", syncPreference);
+    return () => {
+      window.removeEventListener(EDITOR_SPELLCHECK_CHANGED_EVENT, onPreferenceChanged);
       window.removeEventListener("storage", syncPreference);
     };
   }, []);
@@ -378,33 +400,25 @@ export const PreferenceCard = ({
             onChange={updateUiFont}
           />
         </div>
+
+        <div className="flex min-h-16 flex-col items-start gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+          <div className="flex min-w-0 items-center gap-3">
+            <ListTree className={SETTINGS_ITEM_ICON_CLASSNAME} />
+            <div className="min-w-0">
+              <div className={SETTINGS_ITEM_TITLE_CLASSNAME}>{t("settings.showDescendantNotesTitle")}</div>
+            </div>
+          </div>
+          <div className="flex w-full shrink-0 justify-start sm:w-44 sm:justify-end">
+            <Switch
+              checked={showDescendantNotes}
+              onCheckedChange={writeShowDescendantNotesPreference}
+              aria-label={t("settings.showDescendantNotesAria")}
+            />
+          </div>
+        </div>
       </PreferenceSection>
 
       <PreferenceSection title={t("settings.groups.reading")}>
-        <div className="hidden min-h-16 flex-col items-start gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4 lg:flex">
-          <div className="flex min-w-0 items-center gap-3">
-            <AlignHorizontalJustifyCenter className="h-4 w-4 shrink-0 text-slate-500" />
-            <div className="min-w-0">
-              <div className={SETTINGS_ITEM_TITLE_CLASSNAME}>{t("settings.editorContentWidthTitle")}</div>
-              <p className="text-xs leading-5 text-slate-500">{t("settings.editorContentWidthDescription")}</p>
-            </div>
-          </div>
-          <div className="w-full shrink-0 sm:w-80">
-            <Select
-              value={editorContentWidth}
-              onValueChange={(value) => onEditorContentWidthChange(value as EditorContentWidth)}
-            >
-              <SelectTrigger aria-label={t("settings.editorContentWidthTitle")} className="h-9 bg-card">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="standard">{t("settings.editorContentWidths.standard")}</SelectItem>
-                <SelectItem value="wide">{t("settings.editorContentWidths.wide")}</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-
         <div className="flex min-h-16 flex-col items-start gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
           <div className="flex min-w-0 items-center gap-3">
             <BookOpenText className="h-4 w-4 shrink-0 text-slate-500" />
@@ -545,6 +559,7 @@ export const PreferenceCard = ({
       </PreferenceSection>
 
       <PreferenceSection title={t("settings.groups.editing")}>
+        <PicGoSettingsItem />
         <div className="flex min-h-16 flex-col items-start gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
           <div className="flex min-w-0 items-center gap-3">
             <Image className="h-4 w-4 shrink-0 text-slate-500" />
@@ -557,6 +572,25 @@ export const PreferenceCard = ({
               checked={imageCompressionEnabled}
               onCheckedChange={onImageCompressionChange}
               aria-label={t("settings.imageCompressionAria")}
+            />
+          </div>
+        </div>
+
+        <div className="flex min-h-16 flex-col items-start gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+          <div className="flex min-w-0 items-center gap-3">
+            <SpellCheck className="h-4 w-4 shrink-0 text-slate-500" />
+            <div className="min-w-0">
+              <div className={SETTINGS_ITEM_TITLE_CLASSNAME}>{t("settings.spellcheckTitle")}</div>
+            </div>
+          </div>
+          <div className="flex w-full shrink-0 justify-start sm:w-44 sm:justify-end">
+            <Switch
+              checked={spellcheckEnabled}
+              onCheckedChange={(enabled) => {
+                writeEditorSpellcheckPreference(enabled);
+                setSpellcheckEnabled(enabled);
+              }}
+              aria-label={t("settings.spellcheckAria")}
             />
           </div>
         </div>

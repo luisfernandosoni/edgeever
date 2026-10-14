@@ -1,3 +1,5 @@
+import type { PluginNoteKind, PluginContentDocument, PluginDiagramGraph, PluginDiagramEditInput, PluginTableDocument, PluginTableEditInput, PluginPosterDocument, PluginPosterEditInput, PluginInfographicDocument, PluginInfographicEditInput } from "./structured-notes";
+export * from "./structured-notes";
 export declare const PLUGIN_API_VERSION: "2";
 export declare const THEME_API_VERSION: "1";
 export declare const PLUGIN_PERMISSIONS: readonly ["notes:read", "notes:write", "notes:delete", "metadata:read", "metadata:write", "resources:read", "resources:write", "templates:read", "templates:write", "network", "network:public", "ai:generate", "storage", "secrets", "schedules", "editor:read", "editor:write", "ui:commands", "ui:navigation", "ui:notices", "ui:panels", "ui:embeds"];
@@ -43,6 +45,12 @@ interface PluginSettingBase {
     key: string;
     label: string;
     description?: string;
+    locales?: Record<string, {
+        label?: string;
+        description?: string;
+        placeholder?: string;
+        options?: Record<string, string>;
+    }>;
     required?: boolean;
     /** Host-rendered read-only items, opened from a small entry next to the field. */
     list?: PluginSettingList;
@@ -76,7 +84,7 @@ export interface PluginSettingsSchema {
     fields: PluginSettingField[];
 }
 export type PluginSettingValue = string | number | boolean;
-export declare const PLUGIN_API_ERROR_CODES: readonly ["NOTE_CONFLICT", "RESOURCE_CONFLICT", "INVALID_MARKDOWN_EDIT"];
+export declare const PLUGIN_API_ERROR_CODES: readonly ["NOTE_CONFLICT", "RESOURCE_CONFLICT", "INVALID_MARKDOWN_EDIT", "STRUCTURED_NOTE_REQUIRED", "INVALID_STRUCTURED_EDIT", "NOTE_TYPE_MISMATCH", "TABLE_DATA_CHANGES_REQUIRED", "HOST_UPGRADE_REQUIRED"];
 export type PluginApiErrorCode = (typeof PLUGIN_API_ERROR_CODES)[number];
 export interface PluginApiError extends Error {
     code: PluginApiErrorCode;
@@ -124,13 +132,38 @@ export interface MarketplaceEntry {
             stylesCss?: string;
         };
     };
+    /** SPDX license identifier recorded when a community plugin was admitted. */
+    licenseSpdx?: string;
+    /** 40-character commit recorded for a community plugin release. */
+    sourceRevision?: string;
+    /** Plugin API version this community entry was admitted against. */
+    apiVersion?: string;
+    /** Theme API version this community entry was admitted against. */
+    themeApiVersion?: string;
+    /** Capability snapshot used to detect a later permission expansion. */
+    admitted?: {
+        permissions: string[];
+        networkHosts: string[];
+    };
+    /**
+     * Set only by the client after a signed community registry is merged.
+     * Remote files cannot claim this field.
+     */
+    listing?: "community";
+}
+export interface MarketplaceRevocation {
+    id: string;
+    reason: string;
+    revokedAt: string;
 }
 export interface MarketplaceRegistry {
     registryVersion: typeof MARKETPLACE_REGISTRY_VERSION;
     updatedAt: string;
     entries: MarketplaceEntry[];
+    revocations?: MarketplaceRevocation[];
 }
 export interface PluginNoteSummary {
+    kind: PluginNoteKind;
     id: string;
     notebookId: string;
     title: string | null;
@@ -141,6 +174,8 @@ export interface PluginNoteSummary {
     updatedAt: string;
 }
 export interface PluginNote extends PluginNoteSummary {
+    /** Full persisted document; read-only through this API. Special payloads also live in contentMarkdown. */
+    contentJson: PluginContentDocument;
     revision: number;
     contentMarkdown: string;
     contentText: string;
@@ -451,6 +486,16 @@ export interface PluginContext {
         }): Promise<{
             text: string;
         }>;
+        transcribeResource(noteId: string, resourceId: string): Promise<{
+            text: string;
+            resourceId: string;
+            filename: string;
+        }>;
+        transcribeMedia(media: Blob, options?: {
+            signal?: AbortSignal;
+        }): Promise<{
+            text: string;
+        }>;
     };
     notes: {
         query(input?: PluginNoteQuery): Promise<PluginNoteQueryResult>;
@@ -469,6 +514,88 @@ export interface PluginContext {
             list(noteId: string): Promise<PluginNoteRevision[]>;
             restore(noteId: string, revisionId: string): Promise<PluginNote>;
         };
+    };
+    diagrams: {
+        get(noteId: string, options?: {
+            includeLayout?: boolean;
+        }): Promise<{
+            note: PluginNote;
+            diagram: PluginDiagramGraph;
+            editToken: string;
+        }>;
+        edit(noteId: string, input: PluginDiagramEditInput): Promise<{
+            note: PluginNote;
+            diagram: PluginDiagramGraph;
+            editToken: string;
+            dryRun: boolean;
+        }>;
+    };
+    tables: {
+        get(noteId: string): Promise<{
+            note: PluginNote;
+            table: PluginTableDocument;
+            editToken: string;
+        }>;
+        edit(noteId: string, input: PluginTableEditInput): Promise<{
+            note: PluginNote;
+            table: PluginTableDocument;
+            editToken: string;
+            dryRun: boolean;
+            changedCellCount: number;
+            removedAttachmentCount: number;
+        }>;
+    };
+    posters: {
+        capabilities(): Promise<{
+            templates: string[];
+            platforms: Array<{
+                id: string;
+                width: number;
+                height: number;
+            }>;
+            fonts: string[];
+            editableFields: string[];
+            limits: {
+                maxElements: number;
+                maxOperations: number;
+                canvasMin: number;
+                canvasMax: number;
+            };
+        }>;
+        get(noteId: string): Promise<{
+            note: PluginNote;
+            poster: PluginPosterDocument;
+            editToken: string;
+        }>;
+        edit(noteId: string, input: PluginPosterEditInput): Promise<{
+            note: PluginNote;
+            poster: PluginPosterDocument;
+            editToken: string;
+            dryRun: boolean;
+            changed: boolean;
+        }>;
+    };
+    infographics: {
+        capabilities(): Promise<{
+            templates: string[];
+            themes: string[];
+            maxOperations: number;
+        }>;
+        get(noteId: string): Promise<{
+            note: PluginNote;
+            infographic: PluginInfographicDocument;
+            data: Record<string, PluginJsonValue>;
+            template: string;
+            theme?: string;
+            editToken: string;
+        }>;
+        edit(noteId: string, input: PluginInfographicEditInput): Promise<{
+            note: PluginNote;
+            infographic: PluginInfographicDocument;
+            editToken: string;
+            dryRun: boolean;
+            changed: boolean;
+        }>;
     };
     notebooks: {
         list(): Promise<PluginNotebook[]>;
@@ -581,5 +708,13 @@ export declare const defineTheme: <T extends ThemeManifest>(theme: T) => T;
 /** Strips unknown fields and clamps sizes so host chrome rendering stays bounded. */
 export declare const normalizePluginPanelChrome: (value: PluginPanelChrome | null | undefined) => PluginPanelChrome;
 export declare const parseExtensionManifest: (value: unknown) => ExtensionManifest;
+export declare const isReservedMarketplacePluginId: (id: string) => boolean;
 export declare const parseMarketplaceRegistry: (value: unknown) => MarketplaceRegistry;
-export {};
+/**
+ * Overlay a signed community registry onto the bundled official list.
+ * Official entries, their repository URLs, and `publisher: "edgeever"` stay
+ * on the bundled list. A signature does not make a remote entry official.
+ */
+export declare const mergeCommunityMarketplace: (bundled: MarketplaceRegistry, community: MarketplaceRegistry | null, revokedIds: ReadonlySet<string>) => MarketplaceRegistry;
+/** Revocation ids only grow. A later record may replace the reason, never remove the id. */
+export declare const rememberMarketplaceRevocations: (existing: readonly MarketplaceRevocation[], incoming: readonly MarketplaceRevocation[]) => MarketplaceRevocation[];

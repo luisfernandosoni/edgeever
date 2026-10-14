@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { DIAGRAM_CANVAS_LIGHT } from "@edgeever/shared";
 import {
   DEFAULT_CUSTOM_DARK_COLORS,
   DEFAULT_CUSTOM_EDITOR_THEME,
@@ -50,8 +51,24 @@ export interface MermaidThemePalette {
 }
 
 export const MERMAID_THEME_PALETTES: Record<MermaidThemeName, MermaidThemePalette> = {
-  "zinc-light": { bg: "#FFFFFF", fg: "#27272A", line: "#a1a1aa", accent: "#52525b", muted: "#71717a" },
-  "zinc-dark": { bg: "#18181B", fg: "#FAFAFA", line: "#52525b", accent: "#a1a1aa", muted: "#a1a1aa" },
+  "zinc-light": {
+    bg: DIAGRAM_CANVAS_LIGHT,
+    fg: "#27272A",
+    line: "#52525b",
+    accent: "#52525b",
+    muted: "#3f3f46",
+    surface: "#ffffff",
+    border: "#d4d4d8",
+  },
+  "zinc-dark": {
+    bg: "#222325",
+    fg: "#e4e5e7",
+    line: "#85898f",
+    accent: "#c4c7cb",
+    muted: "#b9bdc1",
+    surface: "#2d2f32",
+    border: "#46494e",
+  },
   "tokyo-night": { bg: "#1a1b26", fg: "#a9b1d6", line: "#3d59a1", accent: "#7aa2f7", muted: "#7c85ac" },
   "tokyo-night-storm": { bg: "#24283b", fg: "#a9b1d6", line: "#3d59a1", accent: "#7aa2f7", muted: "#8991b8" },
   "tokyo-night-light": { bg: "#d5d6db", fg: "#343b58", line: "#34548a", accent: "#34548a", muted: "#545a71" },
@@ -158,7 +175,7 @@ const EDITOR_THEME_STORAGE_KEY = "edgeever.editor-theme";
 const CUSTOM_EDITOR_THEME_STORAGE_KEY = "edgeever.custom-editor-theme";
 const CUSTOM_EDITOR_THEMES_STORAGE_KEY = "edgeever.custom-editor-themes";
 const LIGHT_THEME_COLOR = "#eef1f4";
-const DARK_THEME_COLOR = "#101311";
+const DARK_THEME_COLOR = "#121315";
 const AppearanceThemeContext = createContext<AppearanceThemeContextValue | null>(null);
 const MermaidThemeContext = createContext<MermaidThemeContextValue | null>(null);
 const MarkdownThemeContext = createContext<MarkdownThemeContextValue | null>(null);

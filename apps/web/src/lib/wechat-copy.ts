@@ -14,6 +14,7 @@ import { common, createLowlight } from "lowlight";
 import { toCanvas } from "html-to-image";
 import { marked } from "marked";
 import { MERMAID_THEME_PALETTES } from "@/components/ThemeProvider";
+import { scaleMermaidSvg } from "@/lib/mermaid-svg";
 import { copyHtmlToClipboard } from "@/lib/clipboard";
 import { parseCustomCssToStyles } from "@/lib/css-sandbox";
 
@@ -23,8 +24,7 @@ const PUBLISH_MONO = "'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regula
 const BODY_COLOR = "#27272a";
 const QUOTE_COLOR = "#3d4450";
 const CODE_COLOR = "#3d4450";
-const CODE_BACKGROUND = "#f3f5f7";
-const CODE_BORDER = "#e1e5ea";
+const CODE_BACKGROUND = "#e9edf1";
 const LINK_COLOR = "#404040";
 const CHECKED_TASK_COLOR = "#737373";
 
@@ -57,9 +57,9 @@ const applyLegacyWeChatStyles = (
   const fontSize = `${metrics.fontSize}px`;
   const lineHeight = String(metrics.lineHeight);
   const codeSize = `${noteProseCodeFontSize(metrics.fontSize)}px`;
-  // A named hue only recolors links, inline code, and bold, matching the editor.
+  // A named hue only recolors links and bold, matching the editor.
   const link = colors?.link ?? LINK_COLOR;
-  const inlineCodeColor = colors?.codeText ?? CODE_COLOR;
+  const inlineCodeColor = CODE_COLOR;
   const accent = colors?.accent ?? BODY_COLOR;
   const bold = colors ? `font-weight: 800; color: ${accent};` : "font-weight: 800;";
   const textStyle = `font-family: ${PUBLISH_FONT}; font-size: ${fontSize}; line-height: ${lineHeight}; letter-spacing: -0.005em; color: ${BODY_COLOR};`;
@@ -80,7 +80,7 @@ const applyLegacyWeChatStyles = (
     b: bold,
     em: "font-style: italic;",
     del: "text-decoration: line-through;",
-    code: `padding: 2px 6px; border: 1px solid ${CODE_BORDER}; border-radius: 4px; background: ${CODE_BACKGROUND}; color: ${inlineCodeColor}; font-family: ${PUBLISH_MONO}; font-size: ${codeSize}; font-weight: 550;`,
+    code: `padding: 1px 4px; border: 0; border-radius: 4px; background: ${CODE_BACKGROUND}; box-shadow: inset 0 0 0 1px rgba(61,68,80,0.08); color: ${inlineCodeColor}; font-family: ${PUBLISH_MONO}; font-size: ${codeSize}; font-weight: 450;`,
     pre: `margin: 0 0 16px; padding: 14px 16px; overflow: hidden; border: 1px solid #e4e4e4; border-radius: 8px; background: #fafafa; color: #0f172a; font-family: ${PUBLISH_MONO}; font-size: ${codeSize}; line-height: 1.6; text-align: left; white-space: pre-wrap;`,
     hr: "margin: 24px 0; border: 0; border-top: 1px solid #1a1d21;",
     table: `width: 100%; margin: 20px 0; border-collapse: collapse; font-size: ${fontSize}; line-height: 1.45;`,
@@ -90,6 +90,7 @@ const applyLegacyWeChatStyles = (
   };
 
   root.style.cssText = `${textStyle} background-color: #ffffff; word-break: break-word;`;
+  root.querySelectorAll("[data-edgeever-video-note]").forEach((element) => element.remove());
 
   root.querySelectorAll<HTMLElement>("*").forEach((element) => {
     if (element.closest("[data-ee-math]")) return;
@@ -334,13 +335,13 @@ const svgToWeChatImage = async (svg: string) => {
 
 const renderMermaidSvg = async (source: string) => {
   const { renderMermaidSVG, THEMES } = await import("beautiful-mermaid");
-  return renderMermaidSVG(source, {
+  return scaleMermaidSvg(renderMermaidSVG(source, {
     ...THEMES["zinc-light"],
     ...MERMAID_THEME_PALETTES["zinc-light"],
     transparent: true,
     font: "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif",
     padding: 24,
-  });
+  }));
 };
 
 const embedMermaidForWeChat = async (root: HTMLElement, editor?: Editor) => {
@@ -937,32 +938,73 @@ const neutralizeWeChatTopics = (root: HTMLElement) => {
 
 const WECHAT_CONTENT_WIDTH = 677;
 
+/**
+ * html-to-image copies the target's computed position into the SVG snapshot.
+ * A `position: fixed; left: -10000px` target is painted outside that SVG, so
+ * WeChat receives a blank PNG and the formula looks missing. Park the offset
+ * on a wrapper and snapshot an in-flow mount, same as note-image export.
+ */
+const placeMathRasterMount = (host: HTMLElement, kind: "inline" | "block") => {
+  const sandbox = document.createElement("div");
+  sandbox.setAttribute("aria-hidden", "true");
+  sandbox.style.cssText = "position: fixed; left: -10000px; top: 0; pointer-events: none;";
+  const mount = host.cloneNode(true) as HTMLElement;
+  mount.style.position = "static";
+  mount.style.left = "auto";
+  mount.style.top = "auto";
+  mount.style.zIndex = "auto";
+  mount.style.margin = "0";
+  mount.style.transform = "none";
+  mount.style.background = "#ffffff";
+  mount.style.color = BODY_COLOR;
+  mount.style.display = "inline-block";
+  mount.style.width = "max-content";
+  mount.style.maxWidth = "none";
+  mount.style.padding = kind === "block" ? "8px 4px" : "2px 2px";
+  mount.style.boxSizing = "content-box";
+  sandbox.appendChild(mount);
+  document.body.appendChild(sandbox);
+  return { sandbox, mount };
+};
+
+const canvasHasInk = (canvas: HTMLCanvasElement) => {
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) return false;
+  const { data } = context.getImageData(0, 0, canvas.width, canvas.height);
+  for (let index = 0; index < data.length; index += 4) {
+    const alpha = data[index + 3] ?? 0;
+    if (alpha < 16) continue;
+    const red = data[index] ?? 255;
+    const green = data[index + 1] ?? 255;
+    const blue = data[index + 2] ?? 255;
+    if (red < 250 || green < 250 || blue < 250) return true;
+  }
+  return false;
+};
+
 const rasterizeMathForWeChat = async (root: HTMLElement) => {
   const hosts = Array.from(root.querySelectorAll<HTMLElement>("[data-ee-math]"));
   if (hosts.length === 0) return;
-  await document.fonts?.ready;
   for (const host of hosts) {
     const kind = host.getAttribute("data-ee-math") === "block" ? "block" : "inline";
     const latex = host.getAttribute("data-latex") || host.textContent || "";
     if (!host.querySelector(".katex")) continue;
-    const mount = host.cloneNode(true) as HTMLElement;
-    mount.style.position = "fixed";
-    mount.style.left = "-10000px";
-    mount.style.top = "0";
-    mount.style.zIndex = "-1";
-    mount.style.margin = "0";
-    mount.style.background = "transparent";
-    mount.style.display = "inline-block";
-    mount.style.width = "max-content";
-    mount.style.maxWidth = kind === "block" ? `${WECHAT_CONTENT_WIDTH}px` : "none";
-    document.body.appendChild(mount);
+    const { sandbox, mount } = placeMathRasterMount(host, kind);
     try {
+      await document.fonts?.ready;
       const canvas = await toCanvas(mount, {
-        backgroundColor: "transparent",
+        backgroundColor: "#ffffff",
         cacheBust: false,
         pixelRatio: 2,
+        style: {
+          position: "static",
+          left: "0px",
+          top: "0px",
+          margin: "0px",
+          transform: "none",
+        },
       });
-      if (canvas.width < 2 || canvas.height < 2) continue;
+      if (canvas.width < 2 || canvas.height < 2 || !canvasHasInk(canvas)) continue;
       const cssWidth = Math.max(1, Math.round(canvas.width / 2));
       const cssHeight = Math.max(1, Math.round(canvas.height / 2));
       const image = document.createElement("img");
@@ -973,17 +1015,17 @@ const rasterizeMathForWeChat = async (root: HTMLElement) => {
         const height = Math.max(1, Math.round(cssHeight * (width / cssWidth)));
         image.width = width;
         image.height = height;
-        image.style.cssText = `display: block; max-width: 100%; width: ${width}px; height: auto; margin: 16px auto; border: 0; border-radius: 0;`;
+        image.style.cssText = `display: block; max-width: 100%; width: ${width}px; height: auto; margin: 16px auto; border: 0; border-radius: 0; background: #ffffff;`;
       } else {
         image.width = cssWidth;
         image.height = cssHeight;
-        image.style.cssText = `display: inline-block; width: ${cssWidth}px; height: ${cssHeight}px; margin: 0; border: 0; border-radius: 0; vertical-align: -0.15em;`;
+        image.style.cssText = `display: inline-block; max-width: 100%; width: ${cssWidth}px; height: ${cssHeight}px; margin: 0 1px; border: 0; border-radius: 0; background: #ffffff; vertical-align: middle;`;
       }
       host.replaceWith(image);
     } catch {
       // Keep the KaTeX HTML so a failed snapshot never drops the formula.
     } finally {
-      mount.remove();
+      sandbox.remove();
     }
   }
 };
@@ -1006,7 +1048,9 @@ export const readEditorCopyContext = (from?: HTMLElement | null) => {
   const palette = container?.dataset.notePalette;
   let colors: NoteProsePaletteColors | null = null;
   if (style && palette && palette !== "native") {
-    const accent = readPaletteColor(style, "--note-palette-accent");
+    // Publishing uses a light surface even when the editor is in dark mode.
+    const accent = readPaletteColor(style, "--note-palette-light-accent")
+      || readPaletteColor(style, "--note-palette-accent");
     const text = readPaletteColor(style, "--note-palette-text");
     if (accent && text) {
       colors = {
@@ -1077,11 +1121,16 @@ export const buildWeChatClipboardHtml = async (editor: Editor) => {
 export const copyEditorToWeChat = async (editor: Editor) =>
   copyHtmlToClipboard(await buildWeChatClipboardHtml(editor), editor.getText({ blockSeparator: "\n" }));
 
-export const copyMarkdownToWeChat = async (markdown: string) => {
+export const buildMarkdownWeChatHtml = async (markdown: string) => {
   const container = prepareMarkdownPublishArticle(markdown);
   await rasterizeMathForWeChat(container);
   await embedMermaidForWeChat(container);
   await embedImagesForWeChat(container);
   await rasterizePublishOrnamentsForWeChat(container);
-  await copyHtmlToClipboard(container.outerHTML, container.textContent ?? "");
+  return { html: container.outerHTML, text: container.textContent ?? "" };
+};
+
+export const copyMarkdownToWeChat = async (markdown: string) => {
+  const { html, text } = await buildMarkdownWeChatHtml(markdown);
+  await copyHtmlToClipboard(html, text);
 };

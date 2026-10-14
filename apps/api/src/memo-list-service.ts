@@ -5,10 +5,11 @@ import {
   markdownToDoc,
   getDiagramSummary,
   getInfographicSummary,
+  getPosterSummary,
   getTableSummary,
   type MemoSummary,
 } from "@edgeever/shared";
-import { parseJsonArray } from "./entity-utils";
+import { clampNumber, parseJsonArray } from "./entity-utils";
 import type { DatabaseAdapter } from "./storage-contract";
 
 export type MemoSummaryRow = {
@@ -17,6 +18,7 @@ export type MemoSummaryRow = {
   title: string | null;
   excerpt: string;
   content_text?: string | null;
+  is_poster?: number;
   content_markdown?: string | null;
   tags_json: string;
   is_pinned: number;
@@ -73,6 +75,8 @@ export const mapMemoSummary = (row: MemoSummaryRow): MemoSummary => ({
     createExcerpt(docToText(markdownToDoc(row.content_markdown ?? ""))),
   ...getDiagramSummary(row.content_markdown),
   ...getInfographicSummary(row.content_markdown),
+  ...getPosterSummary(row.content_markdown),
+  ...(row.is_poster !== undefined ? { poster: Boolean(row.is_poster) } : {}),
   ...getTableSummary(row.content_markdown),
   tags: parseJsonArray(row.tags_json),
   isPinned: Boolean(row.is_pinned),
@@ -95,10 +99,6 @@ const normalizeMemoListSort = (value: string | undefined): MemoListSortMode =>
 const normalizeMemoListFilter = (value: string | undefined): MemoListFilterMode =>
   value === "tagged" || value === "untagged" || value === "pinned" ? value : "all";
 
-const clampNumber = (value: number, min: number, max: number) => {
-  if (Number.isNaN(value)) return min;
-  return Math.min(Math.max(value, min), max);
-};
 
 const encodeMemoListCursor = (
   memo: MemoSummaryRow,

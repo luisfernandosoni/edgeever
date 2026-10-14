@@ -3,7 +3,7 @@ import type { AiAction, AiPromptParameterKind, AiPromptResultMode } from "./ai-a
 import type { DiagramKind, DiagramSummaryPreview } from "./diagram";
 import type { TableSummaryPreview } from "./table";
 
-export type NoteCreateKind = DiagramKind | "infographic" | "table";
+export type NoteCreateKind = DiagramKind | "infographic" | "table" | "poster";
 
 export type Notebook = {
   id: string;
@@ -29,6 +29,8 @@ export type MemoSummary = {
   structuredTable?: boolean;
   tablePreview?: TableSummaryPreview;
   infographic?: boolean;
+  poster?: boolean;
+  videoNote?: boolean;
   tags: string[];
   isPinned: boolean;
   isArchived: boolean;
@@ -181,6 +183,8 @@ export type ObjectStorageSettings = {
 
 export type AiProvider = "openai-compatible" | "anthropic" | "google";
 
+export type AiTranscriptionStandard = "openai-compatible";
+
 export type AiModelConfig = {
   id: string;
   providerConfigId: string;
@@ -202,6 +206,32 @@ export type AiProviderConfig = {
 export type AiSettings = {
   providers: AiProviderConfig[];
   defaultModelId: string | null;
+  encryptionConfigured: boolean;
+  readOnly: boolean;
+};
+
+export type AiTranscriptionModel = {
+  id: string;
+  providerId: string;
+  modelId: string;
+  displayName: string;
+};
+
+export type AiTranscriptionProvider = {
+  id: string;
+  provider: AiTranscriptionStandard;
+  displayName: string;
+  baseUrl: string;
+  isEnabled: boolean;
+  hasApiKey: boolean;
+  models: AiTranscriptionModel[];
+  credentialsUnavailable?: boolean;
+};
+
+export type AiTranscriptionSettings = {
+  providers: AiTranscriptionProvider[];
+  defaultModelId: string | null;
+  enabled: boolean;
   encryptionConfigured: boolean;
   readOnly: boolean;
 };

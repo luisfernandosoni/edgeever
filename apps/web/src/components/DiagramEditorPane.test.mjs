@@ -96,6 +96,9 @@ describe("diagram editor canvas surface", () => {
     expect(source).not.toContain("attachDiagramScroll");
     expect(globalStyles).toContain(".edgeever-diagram-scroller");
     expect(globalStyles).toContain("scrollbar-gutter: stable");
+    expect(globalStyles).toContain("--edgeever-diagram-canvas");
+    expect(globalStyles).toContain("min-width: 100%");
+    expect(globalStyles).toContain("min-height: 100%");
     expect(globalStyles).toContain('data-panning="true"');
     expect(globalStyles).toContain("cursor: grabbing !important");
   });
@@ -107,7 +110,6 @@ describe("diagram editor canvas surface", () => {
     expect(source).toContain('data-space-pan={spacePanActive ? "active" : undefined}');
     expect(source).toContain('data-shift-select={shiftSelectActive ? "active" : undefined}');
     expect(source).toContain('t("diagram.navHintPan")');
-    expect(source).toContain('t("diagram.navHintHoldShift")');
     expect(source).toContain('t("diagram.navHintBoxSelect")');
     expect(globalStyles).toContain('data-shift-select="active"');
     expect(globalStyles).toContain("cursor: crosshair");
@@ -149,7 +151,8 @@ describe("diagram editor canvas surface", () => {
     expect(source).toContain("EDITOR_LOCAL_SAVE_DELAY_MS");
     expect(source).toContain("window.setTimeout(() => saveRef.current(), EDITOR_LOCAL_SAVE_DELAY_MS)");
     expect(source).toContain("nodeEditor !== null");
-    expect(source).toContain("[dirtyVersion, editSessionReady, editorDirty, nodeEditor, readOnly, saveFailed, saving]");
+    expect(source).toContain("outlineError || outlinePendingBulk || nodeEditor !== null");
+    expect(source).toContain("[dirtyVersion, editSessionReady, editorDirty, nodeEditor, outlineError, outlinePendingBulk, readOnly, saveFailed, saving]");
     expect(source).toContain("tags: nextTags");
     expect(source).toContain("setTagsDirty(hasNewTagChanges)");
     expect(source).toContain("!readOnly && saveFailed");
@@ -454,7 +457,8 @@ describe("diagram editor canvas surface", () => {
   });
 
   test("paints diagram chrome from theme tokens instead of literal white", () => {
-    expect(source).toContain('className="flex h-full min-h-0 flex-col bg-card"');
+    expect(source).toContain('className="relative flex h-full min-h-0 min-w-0 bg-card"');
+    expect(source).toContain('className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col"');
     expect(source).toContain('className="shrink-0 border-b border-slate-200 bg-card"');
     expect(source).not.toContain("flex-col bg-white");
     expect(source).not.toContain("border-slate-200 bg-white");

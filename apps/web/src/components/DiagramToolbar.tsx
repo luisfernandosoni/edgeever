@@ -4,8 +4,12 @@ import {
   BookOpen,
   ChevronDown,
   Download,
+  Eye,
+  EyeOff,
   FileCode2,
   FileImage,
+  ListTree,
+  Network,
   Redo2,
   Trash2,
   Undo2,
@@ -140,7 +144,9 @@ type DiagramToolbarProps = {
   canUndo: boolean;
   hasSelection: boolean;
   leading?: ReactNode;
+  architectureLabels?: { showAll: boolean; onToggle: () => void };
   onAutoLayout: () => void;
+  outlineView?: { active: boolean; available: boolean; onToggle: () => void };
   onDeleteSelection: () => void;
   onExport: (format: "png" | "svg") => void;
   onRedo: () => void;
@@ -256,7 +262,9 @@ export const DiagramToolbar = ({
   canUndo,
   hasSelection,
   leading,
+  architectureLabels,
   onAutoLayout,
+  outlineView,
   onDeleteSelection,
   onExport,
   onRedo,
@@ -280,6 +288,22 @@ export const DiagramToolbar = ({
   const themeLabel = t(`diagram.theme${resolvedTheme.charAt(0).toUpperCase()}${resolvedTheme.slice(1)}` as "diagram.themeBrand");
   return (
     <MemoEditorToolbarRow className="shrink-0 border-b border-slate-200 bg-card" role="toolbar" aria-label={t("diagram.toolbar")}>
+      {outlineView ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button size="sm" variant={outlineView.active ? "soft" : "ghost"} aria-disabled={!outlineView.available} onClick={outlineView.available ? outlineView.onToggle : undefined}>
+              {outlineView.active ? <Network className="h-4 w-4" /> : <ListTree className="h-4 w-4" />}
+              {t(outlineView.active ? "diagram.canvasView" : "diagram.outlineView")}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{t(outlineView.available ? (outlineView.active ? "diagram.canvasView" : "diagram.outlineView") : "diagram.outlineUnavailable")}</TooltipContent>
+        </Tooltip>
+      ) : null}
+      {outlineView?.active ? <>
+        <Tooltip><TooltipTrigger asChild><Button size="icon" variant="ghost" aria-label={t("diagram.undo")} disabled={!canUndo || readOnly} onClick={onUndo}><Undo2 className="h-4 w-4" /></Button></TooltipTrigger><TooltipContent>{t("diagram.undo")}</TooltipContent></Tooltip>
+        <Tooltip><TooltipTrigger asChild><Button size="icon" variant="ghost" aria-label={t("diagram.redo")} disabled={!canRedo || readOnly} onClick={onRedo}><Redo2 className="h-4 w-4" /></Button></TooltipTrigger><TooltipContent>{t("diagram.redo")}</TooltipContent></Tooltip>
+      </> : null}
+      {outlineView?.active ? null : <>
       {leading ? <>{leading}<MemoEditorToolbarDivider /></> : null}
       <Tooltip><TooltipTrigger asChild><Button size="icon" variant="ghost" aria-label={t("diagram.undo")} disabled={!canUndo || readOnly} onClick={onUndo}><Undo2 className="h-4 w-4" /></Button></TooltipTrigger><TooltipContent>{t("diagram.undo")}</TooltipContent></Tooltip>
       <Tooltip><TooltipTrigger asChild><Button size="icon" variant="ghost" aria-label={t("diagram.redo")} disabled={!canRedo || readOnly} onClick={onRedo}><Redo2 className="h-4 w-4" /></Button></TooltipTrigger><TooltipContent>{t("diagram.redo")}</TooltipContent></Tooltip>
@@ -295,6 +319,17 @@ export const DiagramToolbar = ({
           <TooltipContent>{t("diagram.autoLayoutTooltip")}</TooltipContent>
         </Tooltip>
       )}
+      {architectureLabels ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button size="sm" variant={architectureLabels.showAll ? "soft" : "ghost"} className="gap-1.5 px-2.5" aria-pressed={architectureLabels.showAll} onClick={architectureLabels.onToggle}>
+              {architectureLabels.showAll ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+              {t("diagram.allEdgeLabels")}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{t(architectureLabels.showAll ? "diagram.hideDenseEdgeLabels" : "diagram.showAllEdgeLabels")}</TooltipContent>
+        </Tooltip>
+      ) : null}
       <MemoEditorToolbarDivider />
       <Tooltip><TooltipTrigger asChild><Button size="icon" variant="ghost" aria-label={t("diagram.zoomOut")} onClick={onZoomOut}><ZoomOut className="h-4 w-4" /></Button></TooltipTrigger><TooltipContent>{t("diagram.zoomOut")}</TooltipContent></Tooltip>
       <DiagramZoomPercentField zoomPercent={zoomPercent} onZoomTo={onZoomTo} />
@@ -391,6 +426,7 @@ export const DiagramToolbar = ({
         </DropdownMenuContent>
       </DropdownMenu>
       {selectionEditor}
+      </>}
     </MemoEditorToolbarRow>
   );
 };

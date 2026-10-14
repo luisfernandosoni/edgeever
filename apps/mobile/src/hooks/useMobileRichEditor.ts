@@ -36,6 +36,7 @@ import {
   type ProtectedResourceLoadFailure,
 } from "../lib/mobile-protected-resources";
 import type { MobileResourceTarget } from "../lib/mobile-attachments";
+import { uploadMobileResource } from "../lib/mobile-resource-upload";
 
 export type MobileMemoUpdateMutation = UseMutationResult<
   MemoDetail,
@@ -58,17 +59,17 @@ const createLocalImagePreviewDataUrl = async (asset: { mimeType?: string | null;
 };
 
 const alertProtectedImageLoadFailure = (
-  locale: "zh-CN" | "en-US" | "ja",
+  locale: "zh-CN" | "en-US" | "ja" | "pl",
   failure: ProtectedResourceLoadFailure
 ) => {
   const statusLabel = failure.status != null
     ? String(failure.status)
-    : locale === "en-US"
+    : locale !== "zh-CN"
       ? "network error"
       : "网络错误";
   Alert.alert(
     locale !== "zh-CN" ? "Image failed to load" : "图片加载失败",
-    locale === "en-US"
+    locale !== "zh-CN"
       ? `Could not load a note image (${statusLabel}). Check the network and try again.`
       : `笔记中的图片未能加载（${statusLabel}）。请检查网络后重试。`
   );
@@ -392,7 +393,7 @@ export const useMobileRichEditor = ({
           safeDomCall(() => editorRef.current?.beginImageUpload(uploadId, previewDataUrl));
         }
         const uploadAsset = await prepareUploadAsset(asset, imageCompressionEnabled);
-        const { resource } = await client.uploadMemoResource(currentMemo.id, new ExpoFile(uploadAsset.uri));
+        const { resource } = await uploadMobileResource(client, currentMemo.id, uploadAsset);
         applyMobileEditorUpload(editorRef, resource, uploadId, uploadAsset.name || (resource.kind === "image" ? "图片" : "附件"));
         if (resource.kind === "image") sources.push(resource.url);
         uploadId = null;

@@ -19,13 +19,9 @@ final class WorkspaceStore {
     var selectionMode = false
     var selectedMemoIds: Set<String> = []
     var showNotebookPicker = false
+    var startCreatingNotebook = false
     var showActions = false
     var showTagFilterPicker = false
-
-    /// Memo id that should play a return-bounce when the list reappears after create/edit.
-    var bounceMemoId: String?
-    /// Bumped so the same memo can bounce again on a later return.
-    var bouncePulse: Int = 0
 
     private var searchTask: Task<Void, Never>?
 
@@ -64,7 +60,11 @@ final class WorkspaceStore {
         let offset = resetOffset ? 0 : (nextOffset ?? memos.count)
         let notebookIds: [String]? = {
             guard selectedTag == nil, let selectedNotebookId else { return nil }
-            return NotebookHierarchy.descendantIds(notebooks: notebooks, targetNotebookId: selectedNotebookId)
+            return NotebookHierarchy.scopeIds(
+                notebooks: notebooks,
+                targetNotebookId: selectedNotebookId,
+                includeDescendants: env.preferences.showDescendantNotes
+            )
         }()
         let result = try env.mirror.listMemos(
             scope: scope,
@@ -148,17 +148,6 @@ final class WorkspaceStore {
             selectionMode = true
             selectedMemoIds.formUnion(visibleIds)
         }
-    }
-
-    /// Request a rebound animation on a list card after create/edit returns to the list.
-    func requestMemoBounce(memoId: String?) {
-        guard let memoId, !memoId.isEmpty else { return }
-        bounceMemoId = memoId
-        bouncePulse &+= 1
-    }
-
-    func clearMemoBounce() {
-        bounceMemoId = nil
     }
 
     func softDelete(env: AppEnvironment, memoId: String) async {

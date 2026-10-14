@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { isAiTextAttachment, type AiAttachmentMediaType } from "./ai-assistant";
 
+export const COMPANION_MATH_FORMAT_INSTRUCTION = String.raw`In user-facing replies, write inline LaTeX as \(...\) and display LaTeX as $$...$$ on separate lines. Write monetary amounts with ordinary dollar signs, such as $5 and $10. Do not use $...$ for inline math. Preserve quoted source text and note content exactly when the task requires it.`;
+
 export const CompanionIdSchema = z.string().uuid();
 export const CompanionMemoryInputSchema = z.object({
   content: z.string().trim().min(1).max(500),
@@ -34,12 +36,81 @@ export const CompanionTurnInputSchema = z.object({
   useMemory: z.boolean().default(true),
   allowNotes: z.boolean().default(false),
   allowWrites: z.boolean().optional(),
-  locale: z.enum(["zh-CN", "en-US", "ja"]).default("en-US"),
+  locale: z.enum(["zh-CN", "en-US", "ja", "pl"]).default("en-US"),
   focus: CompanionTurnFocusSchema.optional(),
   mentions: z.array(CompanionMentionSchema).max(8).optional(),
   attachmentIds: z.array(z.string().uuid()).max(4).optional(),
 }).strict();
 export type CompanionTurnInput = z.infer<typeof CompanionTurnInputSchema>;
+
+type ConversationLanguage = CompanionTurnInput["locale"];
+
+const requestText = (message: string) =>
+  // The request normally precedes pasted or quoted source text.
+  message.trim().split(/[\n:：]/, 1)[0].slice(0, 200);
+
+const messageLanguage = (message: string): ConversationLanguage | "latin" | null => {
+  const request = requestText(message);
+  // Sidebar translation actions generate localized prompts. Their wording is
+  // interface text, not evidence of the user's conversation language.
+  if (/^(?:请翻译我正在看的内容|请翻译下面这段文字|Translate what I'm looking at|Translate the passage below|今見ている内容を翻訳|下の文章を|Przetłumacz to, na co patrzę|Przetłumacz poniższy fragment)/iu.test(request)) return null;
+  if (/[\p{Script=Hiragana}\p{Script=Katakana}]/u.test(request)) return "ja";
+  if (/\p{Script=Han}/u.test(request)) return "zh-CN";
+  if (/[ąćęłńśźżĄĆĘŁŃŚŹŻ]/u.test(request)) return "pl";
+  if (/[A-Za-z]{2,}/u.test(request)) return "latin";
+  return null;
+};
+
+// Common words that tell English from Polish typed without diacritics. Words
+// both languages use (such as "to", "do", "on", "a", "i", "my") are left out.
+const ENGLISH_WORDS = new Set([
+  "the", "and", "or", "is", "are", "was", "be", "of", "for", "with", "in", "this", "that", "these",
+  "what", "how", "why", "when", "please", "can", "could", "would", "you", "your", "me", "it",
+  "write", "make", "give", "summarize", "translate", "explain", "about", "from", "into", "tomorrow", "today",
+]);
+const POLISH_WORDS = new Set([
+  "w", "z", "na", "nie", "jest", "czy", "jak", "co", "sie", "mi", "mnie", "dla", "oraz", "albo", "jutro",
+  "dzis", "dzisiaj", "prosze", "napisz", "zrob", "podsumuj", "przetlumacz", "wyjasnij", "moje", "moja", "moj",
+  "tego", "ten", "ta", "te", "po", "od", "przez", "pomoz", "daj", "jaki", "jaka", "jakie", "dlaczego",
+  "ktory", "ktora", "ktore", "notatke", "notatki",
+]);
+
+// Latin text without diacritics only proves English when the interface is
+// not Polish; with a Polish interface it is resolved by its common words.
+const latinLanguage = (message: string, fallbackLocale: ConversationLanguage): ConversationLanguage | null => {
+  if (fallbackLocale !== "pl") return "en-US";
+  let english = 0;
+  let polish = 0;
+  for (const word of requestText(message).toLowerCase().match(/[a-z]+/g) ?? []) {
+    if (ENGLISH_WORDS.has(word)) english += 1;
+    if (POLISH_WORDS.has(word)) polish += 1;
+  }
+  if (english > polish) return "en-US";
+  if (polish > english) return "pl";
+  return null;
+};
+
+export const conversationLanguage = (
+  message: string, recentUserMessages: readonly string[], fallbackLocale: ConversationLanguage,
+): { locale: ConversationLanguage; source: "current request" | "recent conversation" | "interface" } => {
+  const candidates = [
+    { text: message, source: "current request" as const },
+    ...recentUserMessages.slice(0, 6).map((text) => ({ text, source: "recent conversation" as const })),
+  ];
+  for (const { text, source } of candidates) {
+    const detected = messageLanguage(text);
+    const locale = detected === "latin" ? latinLanguage(text, fallbackLocale) : detected;
+    if (locale) return { locale, source };
+  }
+  return { locale: fallbackLocale, source: "interface" };
+};
+
+export const translationTargetInstruction = (
+  language: ReturnType<typeof conversationLanguage>,
+): string => {
+  const name = language.locale === "zh-CN" ? "Simplified Chinese" : language.locale === "ja" ? "Japanese" : language.locale === "pl" ? "Polish" : "English";
+  return `For a translation request without an explicit target language, use the language of the current user request, then recent user messages, and only then the interface language. The best available signal for this turn is ${name} (${language.source}). If the source text is mainly in another language, translate into ${name} without asking. If the source is already mainly in ${name}, use an explicit target from this same translation task; otherwise ask which other language the user wants. An explicit target for this text always takes precedence; an older request about different text does not.`;
+};
 
 export type CompanionModelContentPart =
   | { type: "text"; text: string }
@@ -281,7 +352,7 @@ export type CompanionEvent =
   | { type: "process"; text: string }
   | { type: "tools"; tools: CompanionToolCall[]; todos: CompanionTodo[]; questions: CompanionQuestion[] }
   | { type: "done"; turn: CompanionTurn }
-  | { type: "error"; code: string };
+  | { type: "error"; code: string; diagnostics?: CompanionFailureDiagnostics };
 
 export const sealCompanionProcess = (process: string, response: string) => ({
   process: [process.trim(), response.trim()].filter(Boolean).join("\n\n"),
@@ -300,3 +371,28 @@ export const CompanionMemoryImportSchema = z.object({
   memories: z.array(z.object({ content: z.string().trim().min(1).max(500), kind: z.enum(["explicit", "inferred"]).optional() })).max(50),
   controls: z.object({ useMemory: z.boolean(), learningEnabled: z.boolean() }).optional(),
 }).strict();
+
+/** Only fixed categories and HTTP status cross the UI boundary. Never forward SDK
+ * messages, request bodies, response bodies, URLs, headers, or credentials. */
+export type CompanionFailureDiagnostics = {
+  reason: "http" | "network" | "invalidResponse" | "emptyResponse" | "responseLimit";
+  status?: number;
+};
+
+export const companionFailureDiagnostics = (error: unknown, depth = 0): CompanionFailureDiagnostics | undefined => {
+  if (!error || typeof error !== "object" || depth >= 3) return undefined;
+  const record = error as { statusCode?: unknown; status?: unknown; name?: unknown; message?: unknown; cause?: unknown };
+  const status = record.statusCode ?? record.status;
+  if (typeof status === "number" && Number.isInteger(status) && status >= 400 && status <= 599) {
+    return { reason: "http", status };
+  }
+  if (record.name === "AI_InvalidResponseDataError" || record.name === "AI_JSONParseError"
+    || record.name === "AI_TypeValidationError") return { reason: "invalidResponse" };
+  if (record.name === "AI_NoOutputGeneratedError" || record.message === "No text returned.") return { reason: "emptyResponse" };
+  if (record.message === "Response limit exceeded.") return { reason: "responseLimit" };
+  if (typeof record.message === "string" && (
+    (record.name === "TypeError" && /fetch|network|cors/i.test(record.message))
+    || /^(?:fetch failed|failed to fetch|net::ERR_[A-Z_]+)(?:$|\b)/i.test(record.message)
+  )) return { reason: "network" };
+  return companionFailureDiagnostics(record.cause, depth + 1);
+};

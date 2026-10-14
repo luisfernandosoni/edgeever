@@ -1,14 +1,18 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronLeft, FileCode2, FileImage, LoaderCircle, Pencil, Sparkles, Undo2 } from "lucide-react";
+import { AI_ASSISTANT_LAUNCHER_POSITION } from "@/lib/ai-assistant-launcher";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Check, ChevronLeft, Download, FileCode2, FileImage, LayoutTemplate, LoaderCircle, Pencil, Sparkles } from "lucide-react";
 import * as m from "motion/react-m";
 import { useTranslation } from "react-i18next";
 import { INFOGRAPHIC_AGENT_SOURCE_MAX_LENGTH, markdownToDoc, infographicFallbackMarkdown, parseInfographicDocument, serializeInfographicDocument, type InfographicConversationTurn, type InfographicDocument, type MemoDetail, type MemoEditSession, type Notebook } from "@edgeever/shared";
 import type { Infographic as InfographicInstance, SyntaxParseResult } from "@antv/infographic";
 import { Button } from "@/components/ui/button";
-import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
-import { Conversation, ConversationContent, ConversationScrollButton } from "@/components/ai-elements/conversation";
-import { Message, MessageContent, MessageResponse } from "@/components/ai-elements/message";
-import { EditorNoteSearchBar } from "@/components/editor/EditorNoteSearchBar";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { InfographicGallery } from "./InfographicGallery";
+import type { InfographicSample } from "@/lib/infographic-samples";
+import { AiSidebar, readAiSidebarOpen, writeAiSidebarOpen } from "@/components/ai-sidebar/AiSidebar";
+import { AiSidebarErrorBoundary } from "@/components/ai-sidebar/AiSidebarErrorBoundary";
+import type { InfographicSidebarController } from "@/components/ai-sidebar/InfographicSidebarSession";
 import { IconTooltip } from "@/components/editor/EditorPaneChrome";
 import { MemoEditorHeaderActions } from "@/components/MemoEditorHeaderActions";
 import { MemoEditorMetadataRow } from "@/components/MemoEditorMetadataRow";
@@ -17,9 +21,12 @@ import { MEMO_EDITOR_METADATA_ROW_CLASS_NAME, MEMO_EDITOR_TOP_ROW_CLASS_NAME, ne
 import { MemoEditorToolbarDivider } from "@/components/MemoEditorToolbarChrome";
 import { MemoTitleInput } from "@/components/MemoTitleInput";
 import { api } from "@/lib/api";
-import { getNotebookMoveOptions } from "@/lib/app-helpers";
+import { readAiSidebarAdapter, readAiSidebarSource } from "@/lib/desktop-acp";
+import { buildInfographicLocalAgentContext, collectInfographicLocalAgentText, infographicLocalAgentErrorKey, parseInfographicLocalReply } from "@/lib/infographic-local-agent";
+import { formatShortcutBinding, getNotebookMoveOptions, type ShortcutSettings } from "@/lib/app-helpers";
 import { createLocalEditSession, requiresLocalEditSession } from "@/components/editor/editor-pane-helpers";
-import { buildInfographicSyntax, buildOfficialInfographicSyntax, infographicAgentCandidates, INFOGRAPHIC_TEMPLATES, parseGeneratedOfficialData, type InfographicItem } from "@/lib/infographic-generation";
+import { canvasToPngBlob, downloadBlob, frameInfographicExportSvg, infographicExportBasename, rasterizeInfographicSvg, readInfographicSheetColor } from "@/lib/infographic-image-export";
+import { buildInfographicSyntax, buildOfficialInfographicSyntax, infographicAgentCandidates, infographicNoteTitleIsAutomatic, infographicSyntaxTitle, INFOGRAPHIC_TEMPLATES, nextInfographicNoteTitle, parseGeneratedOfficialData, type InfographicItem } from "@/lib/infographic-generation";
 import { statusSettleMotion } from "@/lib/motion";
 import type { EdgeEverRepository } from "@/lib/repository";
 import { cn, parseTagsText } from "@/lib/utils";
@@ -34,6 +41,9 @@ type Props = {
   onOpenExecutionCenter: () => void;
   onSaved: (memo: MemoDetail) => Promise<void>;
   onToggleDesktopFocusMode: () => void;
+  aiAssistantOpenToken: number;
+  shortcutSettings: ShortcutSettings;
+  onOpenCompanionNote?: (id: string, notebookId: string) => void;
 };
 
 const plainLine = (value: string) => value.replace(/\s+/g, " ").trim();
@@ -177,15 +187,6 @@ const applyOfficialVisualTextChange = (syntax: string, payload: VisualTextChange
   return buildOfficialInfographicSyntax(parsed.options.template, data, editable.dark);
 };
 
-const downloadDataUrl = (dataUrl: string, filename: string) => {
-  const link = document.createElement("a");
-  link.href = dataUrl;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-};
-
 export default function InfographicEditorPane({
   memo,
   notebooks,
@@ -196,16 +197,25 @@ export default function InfographicEditorPane({
   onOpenExecutionCenter,
   onSaved,
   onToggleDesktopFocusMode,
+  aiAssistantOpenToken,
+  shortcutSettings,
+  onOpenCompanionNote,
 }: Props) {
   const { t, i18n } = useTranslation();
   const parsed = useMemo(() => parseInfographicDocument(memo.contentMarkdown), [memo.contentMarkdown]);
   const initialTags = memo.tags.join(", ");
   const [title, setTitle] = useState(memo.title ?? "");
+  const titleEditedByUserRef = useRef(!infographicNoteTitleIsAutomatic({
+    noteTitle: memo.title ?? "",
+    graphicTitle: infographicSyntaxTitle(parsed?.syntax ?? ""),
+    defaultTitle: t("infographic.name"),
+    earlierTitles: (parsed?.history ?? []).map((turn) => turn.resultTitle),
+  }));
   const [tagsText, setTagsText] = useState(initialTags);
   const [syntax, setSyntax] = useState(parsed?.syntax ?? "");
   const [history, setHistory] = useState<InfographicConversationTurn[]>(parsed?.history ?? []);
-  const [prompt, setPrompt] = useState("");
   const [activeTurn, setActiveTurn] = useState<{ prompt: string; response: string; template?: string; decision?: string; question?: string } | null>(null);
+  const [aiAssistantOpen, setAiAssistantOpenState] = useState(readAiSidebarOpen);
   const [previousGeneration, setPreviousGeneration] = useState<{ title: string; syntax: string; turnId: string } | null>(null);
   const [generating, setGenerating] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -215,21 +225,19 @@ export default function InfographicEditorPane({
   const [ready, setReady] = useState(false);
   const [savedSnapshot, setSavedSnapshot] = useState(JSON.stringify([memo.title ?? "", parsed?.syntax ?? "", parsed?.history ?? [], initialTags]));
   const [savedHistorySnapshot, setSavedHistorySnapshot] = useState(JSON.stringify(parsed?.history ?? []));
+  const [galleryDialogOpen, setGalleryDialogOpen] = useState(false);
   const [mobileNotebookSheetOpen, setMobileNotebookSheetOpen] = useState(false);
   const [notebookUpdatePending, setNotebookUpdatePending] = useState(false);
   const [headerTitleSlot, setHeaderTitleSlot] = useState<HTMLDivElement | null>(null);
   const [headerStatusCluster, setHeaderStatusCluster] = useState<HTMLDivElement | null>(null);
   const [titleStatusClearancePx, setTitleStatusClearancePx] = useState(0);
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchIndex, setSearchIndex] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
   const instanceRef = useRef<InfographicInstance | null>(null);
   const sessionRef = useRef<MemoEditSession | null>(null);
   const generationControllerRef = useRef<AbortController | null>(null);
+  const handledAiAssistantOpenTokenRef = useRef(aiAssistantOpenToken);
   const memoRef = useRef(memo);
   const tagsRef = useRef(initialTags);
-  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const saveRef = useRef<() => boolean | Promise<boolean>>(() => false);
   const snapshot = JSON.stringify([title, syntax, history, tagsText]);
   const notebookOptions = useMemo(() => getNotebookMoveOptions(notebooks), [notebooks]);
@@ -241,6 +249,18 @@ export default function InfographicEditorPane({
   }, [memo]);
 
   useEffect(() => () => generationControllerRef.current?.abort(), []);
+
+  const setAiSidebarOpen = useCallback((open: boolean) => {
+    setAiAssistantOpenState(open);
+    writeAiSidebarOpen(open);
+  }, []);
+
+  useEffect(() => {
+    if (handledAiAssistantOpenTokenRef.current === aiAssistantOpenToken) return;
+    handledAiAssistantOpenTokenRef.current = aiAssistantOpenToken;
+    if (readOnly) return;
+    setAiSidebarOpen(true);
+  }, [aiAssistantOpenToken, readOnly, setAiSidebarOpen]);
 
   useEffect(() => {
     if (readOnly) return;
@@ -352,6 +372,21 @@ export default function InfographicEditorPane({
     setError(null);
   };
 
+  const handleApplySample = (sample: InfographicSample, sampleSyntax: string, sampleTitle: string) => {
+    if (readOnly) return;
+    if (syntax.trim() && !window.confirm(t("infographic.galleryConfirmReplace"))) {
+      return;
+    }
+    setPreviousGeneration(null);
+    setSyntax(sampleSyntax);
+    if (!title.trim() || title.trim() === t("infographic.name")) {
+      setTitle(sampleTitle);
+    }
+    setGalleryDialogOpen(false);
+    setError(null);
+    setRenderError(null);
+  };
+
   const save = async () => {
     if (readOnly || saving || !dirty || !ready || !sessionRef.current) return false;
     if (syntax.trim() && (renderError || !previewReady || !instanceRef.current)) {
@@ -439,27 +474,10 @@ export default function InfographicEditorPane({
     };
   }, [dirty, headerStatusCluster, headerTitleSlot, saving]);
 
-  const searchMatches = useMemo(() => {
-    const query = searchQuery.trim().toLocaleLowerCase();
-    if (!searchOpen || !query) return [];
-    return history.filter((turn) => `${turn.prompt}\n${turn.response}\n${turn.resultTitle}`.toLocaleLowerCase().includes(query));
-  }, [history, searchOpen, searchQuery]);
-
-  useEffect(() => {
-    setSearchIndex(0);
-  }, [searchQuery, searchMatches.length]);
-
-  const moveSearchMatch = (direction: -1 | 1) => {
-    if (!searchMatches.length) return;
-    const next = (searchIndex + direction + searchMatches.length) % searchMatches.length;
-    setSearchIndex(next);
-    document.querySelector(`[data-infographic-turn="${searchMatches[next]?.id}"]`)?.scrollIntoView({ block: "nearest" });
-  };
-
-  const generate = async () => {
-    const message = prompt.trim();
-    if (!message || generating || readOnly) return;
-    setGenerating(true); setError(null); setActiveTurn({ prompt: message, response: "" });
+  const generate = async (message: string) => {
+    const promptText = message.trim();
+    if (!promptText || generating || readOnly) throw new Error("empty");
+    setGenerating(true); setError(null); setActiveTurn({ prompt: promptText, response: "" }); setAiSidebarOpen(true);
     const controller = new AbortController();
     generationControllerRef.current = controller;
     let response = "";
@@ -472,16 +490,57 @@ export default function InfographicEditorPane({
       const currentContent = existingTemplate && existingOptions.data
         ? JSON.stringify({ template: existingTemplate, data: existingOptions.data }) : syntax;
       if (currentContent.length > INFOGRAPHIC_AGENT_SOURCE_MAX_LENGTH) throw new Error(t("infographic.contentTooLarge"));
-      const candidates = infographicAgentCandidates(message, getTemplates(), existingTemplate);
+      const candidates = infographicAgentCandidates(promptText, getTemplates(), existingTemplate);
       if (!candidates.length) throw new Error(t("infographic.aiInvalidResponse"));
-      await api.streamInfographicAgent({
-        prompt: message,
+      const agentHistory = history.filter((turn) => !turn.undoneAt && turn.kind !== "failed")
+        .slice(-12).map((turn) => ({ prompt: turn.prompt, response: `${turn.kind === "clarified" ? "No infographic change was applied. Clarification: " : ""}${turn.response || turn.resultTitle}${turn.decision ? `\nDecision: ${turn.decision}` : ""}`.slice(0, 2000) }));
+      if (readAiSidebarSource() === "local") {
+        const adapter = readAiSidebarAdapter();
+        if (!adapter) throw new Error(t("aiAssistant.sidebar.localMissing"));
+        let raw = "";
+        try {
+          raw = await collectInfographicLocalAgentText({
+            request: {
+              adapterId: adapter.id,
+              ...(adapter.path ? { path: adapter.path } : {}),
+              prompt: promptText,
+              contextText: buildInfographicLocalAgentContext({
+                prompt: promptText,
+                ...(existingTemplate ? { currentTemplate: existingTemplate } : {}),
+                currentContent,
+                candidates,
+                history: agentHistory,
+              }),
+              noteAccess: false,
+            },
+            signal: controller.signal,
+            onText: (text) => {
+              response = text;
+              setActiveTurn((current) => current ? { ...current, response: text } : current);
+            },
+          });
+        } catch (caught) {
+          if (controller.signal.aborted) throw caught;
+          const message = caught instanceof Error ? caught.message : "";
+          const key = infographicLocalAgentErrorKey(message, adapter.id);
+          throw new Error(key ? t(key) : message || t("infographic.aiError"));
+        }
+        const reply = parseInfographicLocalReply(raw, candidates, promptText);
+        response = reply.visibleText;
+        if (reply.proposal) {
+          proposal = reply.proposal;
+          setActiveTurn((current) => current ? { ...current, response, template: reply.proposal?.template, decision: reply.proposal?.explanation } : current);
+        } else if (reply.question) {
+          question = reply.question;
+          setActiveTurn((current) => current ? { ...current, response, question } : current);
+        } else throw new Error(t("infographic.aiInvalidResponse"));
+      } else await api.streamInfographicAgent({
+        prompt: promptText,
         locale: i18n.resolvedLanguage,
         ...(existingTemplate ? { currentTemplate: existingTemplate } : {}),
         currentContent,
         candidates,
-        history: history.filter((turn) => !turn.undoneAt && turn.kind !== "failed")
-          .slice(-12).map((turn) => ({ prompt: turn.prompt, response: `${turn.kind === "clarified" ? "No infographic change was applied. Clarification: " : ""}${turn.response || turn.resultTitle}${turn.decision ? `\nDecision: ${turn.decision}` : ""}`.slice(0, 2000) })),
+        history: agentHistory,
       }, { signal: controller.signal, onEvent: (event) => {
         if (event.type === "text-delta") {
           response += event.text;
@@ -497,6 +556,7 @@ export default function InfographicEditorPane({
         }
         if (event.type === "error") throw new Error(event.message);
       } });
+      if (controller.signal.aborted) throw new DOMException("aborted", "AbortError");
       if (proposal) {
         const selected = proposal as { template: string; data: Record<string, unknown>; explanation: string };
         if (!candidates.includes(selected.template)) throw new Error(t("infographic.aiInvalidResponse"));
@@ -507,47 +567,75 @@ export default function InfographicEditorPane({
         if (parsedCandidate.errors.length || !parsedCandidate.options.template || !getTemplate(parsedCandidate.options.template)) throw new Error(t("infographic.aiInvalidResponse"));
         const generatedTitle = String(data.title ?? "");
         const turnId = crypto.randomUUID();
+        const previousGraphicTitle = String(existingOptions.data?.title ?? "");
+        const nextTitle = nextInfographicNoteTitle({
+          noteTitle: title,
+          previousGraphicTitle,
+          nextGraphicTitle: generatedTitle,
+          defaultTitle: t("infographic.name"),
+          keepCustomTitle: titleEditedByUserRef.current,
+        });
         setPreviousGeneration({ title, syntax, turnId });
         setHistory((turns) => [...turns, {
-          id: turnId, prompt: message, createdAt: new Date().toISOString(),
+          id: turnId, prompt: promptText, createdAt: new Date().toISOString(),
           kind: syntax.trim() ? "refined" : "generated", resultTitle: generatedTitle,
           response: (response.trim() || selected.explanation).slice(0, 4000), decision: selected.explanation.slice(0, 500), template: selected.template,
         }]);
         setSyntax(candidate);
-        const previousGraphicTitle = String(existingOptions.data?.title ?? "").trim();
-        if (!title.trim() || title.trim() === t("infographic.name") || (previousGraphicTitle && title.trim() === previousGraphicTitle)) setTitle(generatedTitle);
+        if (nextTitle !== title) setTitle(nextTitle);
       } else if (question) {
-        setHistory((turns) => [...turns, { id: crypto.randomUUID(), prompt: message, createdAt: new Date().toISOString(), kind: "clarified", resultTitle: "", response: (response.trim() || question).slice(0, 4000) }]);
+        setHistory((turns) => [...turns, { id: crypto.randomUUID(), prompt: promptText, createdAt: new Date().toISOString(), kind: "clarified", resultTitle: "", response: (response.trim() || question).slice(0, 4000) }]);
       } else throw new Error(t("infographic.aiInvalidResponse"));
-      setPrompt("");
     } catch (caught) {
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted) throw caught;
       const messageText = caught instanceof Error ? caught.message : t("infographic.aiError");
       setError(messageText);
-      setHistory((turns) => [...turns, { id: crypto.randomUUID(), prompt: message, createdAt: new Date().toISOString(), kind: "failed", resultTitle: "", response: response.slice(0, 4000), error: messageText.slice(0, 1000) }]);
+      setHistory((turns) => [...turns, { id: crypto.randomUUID(), prompt: promptText, createdAt: new Date().toISOString(), kind: "failed", resultTitle: "", response: response.slice(0, 4000), error: messageText.slice(0, 1000) }]);
+      throw caught instanceof Error ? caught : new Error(messageText);
     } finally { if (generationControllerRef.current === controller) generationControllerRef.current = null; setActiveTurn(null); setGenerating(false); }
   };
 
   const exportImage = async (type: "svg" | "png") => {
-    if (!instanceRef.current || renderError || !previewReady) return;
+    const svg = containerRef.current?.querySelector("svg");
+    if (!(svg instanceof SVGSVGElement) || renderError || !previewReady) return;
     try {
-      const url = await instanceRef.current.toDataURL({ type });
-      downloadDataUrl(url, `${(title.trim() || "infographic").replace(/[\\/:*?"<>|]/g, "-")}.${type}`);
-    } catch (caught) { setError(caught instanceof Error ? caught.message : t("infographic.renderError")); }
+      const { exportToSVG } = await import("@antv/infographic");
+      const exported = await exportToSVG(svg);
+      const sheetColor = readInfographicSheetColor(containerRef.current?.parentElement ?? null, syntax.split("\n")[1] === "theme dark");
+      frameInfographicExportSvg(exported, sheetColor);
+      const basename = infographicExportBasename(title.trim() || t("infographic.name"));
+      if (type === "svg") {
+        downloadBlob(new Blob([new XMLSerializer().serializeToString(exported)], { type: "image/svg+xml;charset=utf-8" }), `${basename}.svg`);
+        return;
+      }
+      downloadBlob(await canvasToPngBlob(await rasterizeInfographicSvg(exported, sheetColor)), `${basename}.png`);
+    } catch {
+      setError(t("infographic.exportError"));
+    }
   };
 
   const previewUsesLightSheet = Boolean(syntax.trim()) && syntax.split("\n")[1] !== "theme dark";
   const saveStatus = saving ? "saving" : dirty ? "unsaved" : "saved";
   const saveLabel = t(`editor.saveState.${saveStatus}`);
   const saveStatusClassName = saveStatus === "saved" ? "text-slate-400" : "bg-slate-100 text-slate-700";
-  const visibleHistory = !searchOpen || !searchQuery.trim() ? history : searchMatches;
-  const activeSearchId = searchOpen && searchQuery.trim() ? searchMatches[searchIndex]?.id : undefined;
+  const infographicAssistant: InfographicSidebarController = {
+    turns: history,
+    activeTurn,
+    generating,
+    readOnly,
+    canUndo: Boolean(previousGeneration),
+    hasGraphic: Boolean(syntax.trim()),
+    onSubmit: generate,
+    onUndo: undoGeneration,
+    onStop: () => generationControllerRef.current?.abort(),
+  };
 
-  return <div className="flex h-full min-h-0 flex-col bg-card text-foreground">
+  return <div className="relative flex h-full min-h-0 min-w-0 bg-card text-foreground">
+    <div className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col">
     <header className="shrink-0 border-b border-slate-200 bg-card">
       <div className={cn(MEMO_EDITOR_TOP_ROW_CLASS_NAME, "border-b-0")}>
-        <div className="min-w-0 w-full" style={titleStatusClearancePx > 0 ? { paddingRight: titleStatusClearancePx } : undefined}>
-          <div ref={setHeaderTitleSlot} className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 px-4 sm:flex-nowrap">
+        <div ref={setHeaderTitleSlot} className="min-w-0 w-full" style={titleStatusClearancePx > 0 ? { paddingRight: titleStatusClearancePx } : undefined}>
+          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 px-4 sm:flex-nowrap">
             <MemoEditorTopRowLeading
               mobileBackButton={(
                 <IconTooltip label={t("common.back")}>
@@ -555,7 +643,7 @@ export default function InfographicEditorPane({
                 </IconTooltip>
               )}
               titleInput={(
-                <MemoTitleInput className="w-full min-w-0 px-2" value={title} onValueChange={setTitle} placeholder={t("infographic.name")} readOnly={readOnly} />
+                <MemoTitleInput className="w-full min-w-0 px-2" value={title} onValueChange={(value) => { titleEditedByUserRef.current = true; setTitle(value); }} placeholder={t("infographic.name")} readOnly={readOnly} />
               )}
             />
             <MemoEditorMetadataRow
@@ -593,15 +681,52 @@ export default function InfographicEditorPane({
           <MemoEditorToolbarDivider className="mx-0.5 hidden h-4 sm:block" />
           <div className="flex items-center gap-0.5">
             <MemoEditorFocusModeButton desktopFocusMode={desktopFocusMode} onToggleDesktopFocusMode={onToggleDesktopFocusMode} />
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 gap-1 px-2 text-xs"
+              onClick={() => setGalleryDialogOpen(true)}
+              aria-label={t("infographic.galleryTemplatesButton")}
+            >
+              <LayoutTemplate className="h-4 w-4 text-slate-500" />
+              <span className="hidden sm:inline">{t("infographic.galleryTemplatesButton")}</span>
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 gap-1 px-2 text-xs"
+                  data-infographic-export=""
+                  disabled={!previewReady || Boolean(renderError)}
+                  aria-label={t("infographic.export")}
+                >
+                  <Download className="h-4 w-4" />
+                  <span className="hidden sm:inline">{t("infographic.export")}</span>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-40">
+                <DropdownMenuItem className="gap-2" disabled={!previewReady || Boolean(renderError)} onClick={() => void exportImage("png")}>
+                  <FileImage className="h-4 w-4 text-slate-500" />
+                  {t("infographic.exportPng")}
+                </DropdownMenuItem>
+                <DropdownMenuItem className="gap-2" disabled={!previewReady || Boolean(renderError)} onClick={() => void exportImage("svg")}>
+                  <FileCode2 className="h-4 w-4 text-slate-500" />
+                  {t("infographic.exportSvg")}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <MemoEditorHeaderActions
               moreMenuClassName="w-48"
               onOpenExecutionCenter={onOpenExecutionCenter}
-              onSearch={() => {
-                setSearchOpen(true);
-                window.requestAnimationFrame(() => searchInputRef.current?.focus());
-              }}
               moreMenuItems={(
                 <>
+                  <DropdownMenuItem onClick={() => setGalleryDialogOpen(true)}>
+                    <LayoutTemplate className="h-4 w-4 text-slate-500" />
+                    {t("infographic.galleryTitle")}
+                  </DropdownMenuItem>
                   <DropdownMenuItem disabled={!previewReady || Boolean(renderError)} onClick={() => void exportImage("svg")}>
                     <FileCode2 className="h-4 w-4 text-slate-500" />
                     {t("infographic.exportSvg")}
@@ -616,64 +741,68 @@ export default function InfographicEditorPane({
           </div>
         </div>
       </div>
-      {searchOpen ? (
-        <EditorNoteSearchBar
-          inputRef={searchInputRef}
-          query={searchQuery}
-          replacement=""
-          replaceOpen={false}
-          readOnly
-          matchCount={searchMatches.length}
-          matchLabel={searchQuery.trim() ? `${searchMatches.length ? searchIndex + 1 : 0}/${searchMatches.length}` : ""}
-          onQueryChange={setSearchQuery}
-          onReplacementChange={() => undefined}
-          onMoveMatch={moveSearchMatch}
-          onReplaceAll={() => undefined}
-          onClose={() => setSearchOpen(false)}
-        />
-      ) : null}
     </header>
     {error ? <p role="alert" className="border-b border-red-100 bg-red-50 px-5 py-2 text-sm text-red-700">{error}</p> : null}
-    <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(300px,34%)_1fr]">
-      <section className="flex min-h-[320px] max-h-[60vh] flex-col border-b border-slate-200 p-5 lg:min-h-0 lg:max-h-none lg:border-b-0 lg:border-r">
-        <h2 className="mb-3 text-sm font-semibold text-slate-800">{t("infographic.historyTitle")}</h2>
-        <Conversation className="min-h-0 flex-1" aria-label={t("infographic.historyTitle")}>
-          <ConversationContent className="gap-4 p-0 pb-5">
-            {visibleHistory.map((turn) => <div key={turn.id} data-infographic-turn={turn.id} className={cn("space-y-2", turn.id === activeSearchId && "rounded-xl ring-1 ring-slate-300")}>
-              <Message from="user"><MessageContent className="whitespace-pre-wrap break-words group-[.is-user]:rounded-xl group-[.is-user]:bg-slate-100 group-[.is-user]:px-3 group-[.is-user]:py-2">{turn.prompt}</MessageContent></Message>
-              <Message from="assistant"><MessageContent className="w-full rounded-xl border border-slate-200 bg-card px-3 py-2 text-foreground">
-                <MessageResponse className="edgeever-infographic-chat-response break-words">{turn.response || (turn.kind === "clarified" ? t("infographic.historyClarified") : turn.kind === "failed" ? t("infographic.historyFailed") : t(turn.kind === "generated" ? "infographic.historyGenerated" : "infographic.historyRefined", { title: turn.resultTitle || t("infographic.name") }))}</MessageResponse>
-                {turn.decision && turn.decision !== turn.response && <p className="text-xs text-slate-600">{turn.decision}</p>}
-                {turn.template && <p className="text-xs text-slate-500">{turn.template}</p>}
-                {turn.error && <p className="text-xs text-red-600">{turn.error}</p>}
-                {turn.undoneAt && <p className="text-xs text-slate-500">{t("infographic.historyUndone")}</p>}
-                <time className="block text-xs text-slate-500" dateTime={turn.createdAt}>{new Date(turn.createdAt).toLocaleString(i18n.resolvedLanguage)}</time>
-              </MessageContent></Message>
-            </div>)}
-            {activeTurn && <div className="space-y-2" aria-live="polite">
-              <Message from="user"><MessageContent className="whitespace-pre-wrap break-words group-[.is-user]:rounded-xl group-[.is-user]:bg-slate-100 group-[.is-user]:px-3 group-[.is-user]:py-2">{activeTurn.prompt}</MessageContent></Message>
-              <Message from="assistant"><MessageContent className="w-full rounded-xl border border-slate-200 bg-card px-3 py-2 text-foreground">
-                <MessageResponse className="edgeever-infographic-chat-response break-words" isAnimating={generating}>{activeTurn.response || activeTurn.question || t("infographic.generating")}</MessageResponse>
-                {activeTurn.decision && activeTurn.decision !== activeTurn.response && <p className="text-xs text-slate-600">{activeTurn.decision}</p>}
-                {activeTurn.template && <p className="text-xs text-slate-500">{activeTurn.template}</p>}
-              </MessageContent></Message>
-            </div>}
-          </ConversationContent>
-          <ConversationScrollButton aria-label={t("infographic.scrollToBottom")} />
-        </Conversation>
-        {!readOnly && <div className="shrink-0 rounded-xl border border-slate-200 bg-slate-50 p-4">
-          <label className="mb-2 block text-sm font-medium text-slate-800" htmlFor="infographic-prompt"><Sparkles className="mr-1 inline h-4 w-4 text-slate-700" />{t(syntax.trim() ? "infographic.refine" : "infographic.describe")}</label>
-          <textarea id="infographic-prompt" maxLength={1000} disabled={generating} className="min-h-24 w-full rounded-md border border-slate-200 bg-card p-3 text-sm text-foreground outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-slate-900/20 disabled:opacity-60" placeholder={t(syntax.trim() ? "infographic.refinePrompt" : "infographic.prompt")} value={prompt} onChange={(event) => setPrompt(event.target.value)} onKeyDown={(event) => {
-            if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing || event.keyCode === 229) return;
-            event.preventDefault();
-            if (!event.repeat && prompt.trim() && !generating) void generate();
-          }} />
-          <div className="mt-2 flex flex-wrap items-center gap-2"><Button size="sm" disabled={!prompt.trim() || generating} onClick={() => void generate()}>{generating ? <LoaderCircle className="mr-1 h-4 w-4 animate-spin" /> : <Sparkles className="mr-1 h-4 w-4" />}{generating ? t("infographic.generating") : t(syntax.trim() ? "infographic.applyRefinement" : "infographic.generate")}</Button>
-            {previousGeneration && <Button size="sm" variant="outline" onClick={undoGeneration}><Undo2 className="mr-1 h-4 w-4" />{t("infographic.undoGeneration")}</Button>}
-          </div>
-        </div>}
-      </section>
-      <section className="min-h-0 overflow-auto bg-slate-50 p-4"><div className={`min-h-[420px] rounded-xl border border-slate-200 p-4 shadow-sm ${previewUsesLightSheet ? "bg-white" : "bg-card"}`}><div ref={containerRef} className="edgeever-infographic-preview min-h-[380px] w-full" />{!syntax.trim() && <p className="pt-32 text-center text-sm text-muted-foreground">{t("infographic.noPreview")}</p>}{renderError && <p role="alert" className="text-sm text-destructive">{renderError}</p>}</div></section>
+    <section className="min-h-0 flex-1 overflow-auto bg-slate-50 p-4">
+      {!syntax.trim() ? (
+        <div className="relative min-h-full rounded-xl border border-slate-200 bg-white p-2 sm:p-4 shadow-sm">
+          <div ref={containerRef} className="edgeever-infographic-preview hidden" />
+          <InfographicGallery
+            readOnly={readOnly}
+            onSelect={handleApplySample}
+          />
+        </div>
+      ) : (
+        <div className={`relative flex min-h-full flex-col rounded-xl border border-slate-200 p-4 shadow-sm ${previewUsesLightSheet ? "bg-white" : "bg-card"}`}>
+          <div ref={containerRef} className="edgeever-infographic-preview min-h-[380px] w-full flex-1" />
+          {renderError ? <p role="alert" className="text-sm text-destructive">{renderError}</p> : null}
+        </div>
+      )}
+    </section>
+    {!readOnly && !aiAssistantOpen ? (
+      <IconTooltip
+        side="left"
+        label={`${t("aiAssistant.open")} (${formatShortcutBinding(shortcutSettings.openAiAssistant)})`}
+      >
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          data-ai-assistant-launcher=""
+          className={`${AI_ASSISTANT_LAUNCHER_POSITION} absolute z-30 size-11 rounded-full border-slate-200 bg-card text-slate-950 shadow-[0_8px_24px_rgba(15,23,42,0.14)] hover:bg-card hover:text-slate-950`}
+          aria-label={t("aiAssistant.open")}
+          onClick={() => setAiSidebarOpen(true)}
+        >
+          <Sparkles className="size-5" strokeWidth={1.75} />
+        </Button>
+      </IconTooltip>
+    ) : null}
     </div>
+    <AiSidebarErrorBoundary open={aiAssistantOpen} onOpenChange={setAiSidebarOpen}>
+      <AiSidebar
+        open={aiAssistantOpen}
+        onOpenChange={setAiSidebarOpen}
+        companionAvailable={false}
+        contentMarkdown={syntax}
+        memoId={memo.id}
+        notebookId={memo.notebookId}
+        noteTitle={title}
+        infographic={infographicAssistant}
+        onOpenCompanionNote={onOpenCompanionNote}
+      />
+    </AiSidebarErrorBoundary>
+    <Dialog open={galleryDialogOpen} onOpenChange={setGalleryDialogOpen}>
+      <DialogContent className="max-w-5xl max-h-[85vh] overflow-y-auto p-4 sm:p-6">
+        <DialogHeader className="sr-only">
+          <DialogTitle>{t("infographic.galleryTitle")}</DialogTitle>
+          <DialogDescription>{t("infographic.galleryTitle")}</DialogDescription>
+        </DialogHeader>
+        <InfographicGallery
+          readOnly={readOnly}
+          isDialog
+          onSelect={handleApplySample}
+        />
+      </DialogContent>
+    </Dialog>
   </div>;
 }

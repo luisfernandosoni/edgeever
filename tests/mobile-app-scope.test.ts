@@ -90,9 +90,9 @@ describe("mobile app scope", () => {
   });
 
   test("keeps version history reachable from an active note", () => {
-    expect(memoDetailSource).toMatch(
-      /\{memo && !memo\.isDeleted \? \(\s*<Pressable\s+accessibilityLabel="版本历史"/
-    );
+    expect(memoDetailSource).toContain("{!memo.isDeleted ? (");
+    expect(memoDetailSource).toContain('label={resolvedLocale !== "zh-CN" ? "Version history" : "版本历史"}');
+    expect(memoDetailSource).toContain("onPress={() => closeActionsAndRun(() => onOpenRevisions(memo))}");
     expect(memoDetailSource).toContain('syncStatus === "conflict"');
     expect(memoDetailSource).toContain("onResolveSyncConflict");
   });
@@ -158,7 +158,7 @@ describe("mobile app scope", () => {
     expect(workspaceSource).toContain("onOpenTagFilter={() => setTagFilterPickerOpen(true)}");
 
     expect(iosWorkspaceViewSource).toContain("store.showTagFilterPicker = true");
-    expect(iosWorkspaceViewSource).toContain('env.preferences.t("按标签筛选", en: "Filter by tag")');
+    expect(iosWorkspaceViewSource).toContain('env.preferences.t("按标签筛选", en: "Filter by tag"');
     expect(iosWorkspaceViewSource).not.toContain('env.preferences.t("有标签", en: "Tagged")');
     expect(iosWorkspaceViewSource).not.toContain('env.preferences.t("无标签", en: "Untagged")');
   });
@@ -172,12 +172,12 @@ describe("mobile app scope", () => {
     expect(iosLocalMirrorSource).not.toContain("json_each(mobile_memos.data_json");
   });
 
-  test("keeps Android memo list motion and spring feedback", () => {
-    expect(notesViewSource).toContain("FadeInDown.duration(260).springify().damping(18)");
-    expect(notesViewSource).toContain("FadeOutUp.duration(220)");
-    expect(notesViewSource).toContain("LinearTransition.duration(220)");
-    expect(notesViewSource).toContain("pressScale.value = withTiming(0.985");
-    expect(notesViewSource).toContain("pressScale.value = withTiming(1");
+  test("keeps Android memo list interactions free of spring and press-scale motion", () => {
+    expect(notesViewSource).not.toContain("springify()");
+    expect(notesViewSource).not.toContain("FadeInDown");
+    expect(notesViewSource).not.toContain("FadeOutUp");
+    expect(notesViewSource).not.toContain("LinearTransition");
+    expect(notesViewSource).not.toContain("pressScale.value");
   });
 
   test("hardens DOM/WebView hosts against media capture probes during App Review", () => {
@@ -214,13 +214,20 @@ describe("mobile app scope", () => {
     expect(localTiptapEditorSource).toContain("autofocus: false");
     expect(localTiptapEditorSource).toContain('import("mermaid/dist/mermaid.min.js")');
     expect(localTiptapEditorSource).toContain('import("beautiful-mermaid")');
-    expect(localTiptapEditorSource).toContain('import("html-to-image")');
+    expect(localTiptapEditorSource).toContain('import { toCanvas } from "html-to-image"');
     expect(localTiptapEditorSource).not.toContain('import "mermaid/dist/mermaid.min.js"');
   });
 
   test("lets view-mode change the note notebook without entering the editor", () => {
     expect(memoDetailSource).toContain('setViewerNotebookPickerOpen(true)');
-    expect(memoDetailSource).toContain("payload: { notebookId: nextNotebookId }");
+    const selectNotebookSource = memoDetailSource.slice(
+      memoDetailSource.indexOf("const handleViewerNotebookSelect ="),
+      memoDetailSource.indexOf("const openViewerTags =")
+    );
+    expect(selectNotebookSource).toContain("setViewerNotebookId(nextNotebookId)");
+    expect(selectNotebookSource).not.toContain("mutateAsync");
+    expect(memoDetailSource).toContain("payload: { notebookId: viewerNotebookId, tags: viewerTags }");
+    expect(memoDetailSource).toContain("onPress={() => void saveViewerMetadata()}");
     expect(memoDetailSource).toContain("includeAllNotes={false}");
     expect(memoDetailSource).toContain('accessibilityLabel="所在笔记本"');
     expect(memoDetailSource).toContain("handleViewerNotebookSelect");

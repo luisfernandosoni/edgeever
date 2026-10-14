@@ -14,6 +14,20 @@ declare const __EDGEEVER_DEPLOYMENT_METHOD__: string;
 declare const __EDGEEVER_DEVELOPMENT_PROFILE__: "" | "local" | "demo";
 declare const __EDGEEVER_DESKTOP_BUILD__: boolean;
 
+interface DesktopGlobalShortcutBinding {
+  key: string;
+  ctrl: boolean;
+  meta: boolean;
+  alt: boolean;
+  shift: boolean;
+}
+
+interface DesktopGlobalShortcutState {
+  binding: DesktopGlobalShortcutBinding | null;
+  registered: boolean;
+  error?: "invalid" | "unavailable" | "saveFailed";
+}
+
 interface EdgeEverDesktopBridge {
   isAvailable: boolean;
   canClearLocalData: boolean;
@@ -26,6 +40,11 @@ interface EdgeEverDesktopBridge {
   copyImage(bytes: Uint8Array): Promise<boolean>;
   setSessionToken(value: string): Promise<{ stored: boolean }>;
   clearSessionToken(): Promise<{ stored: false }>;
+  testPicGoConnection(endpoint: string): Promise<boolean>;
+  uploadPicGoImage(input: {
+    endpoint: string; bytes: Uint8Array; filename: string; mimeType: string;
+    copy: import("@/lib/picgo").PicGoFailureCopy;
+  }): Promise<{ url: string } | { fallback: true }>;
   publicNetworkFetch(requestId: string, input: import("@edgeever/shared").PluginPublicFetchRequest): Promise<import("@edgeever/shared").PluginPublicFetchResponse>;
   cancelPublicNetworkFetch(requestId: string): Promise<void>;
   openAiProviderStream(requestId: string, input: {
@@ -33,6 +52,7 @@ interface EdgeEverDesktopBridge {
     method?: string;
     headers?: Record<string, string>;
     body: string;
+    bodyBytes?: Uint8Array;
   }): Promise<{ status: number; headers: Record<string, string> }>;
   cancelAiProviderStream(requestId: string): void;
   onAiProviderStreamChunk(callback: (requestId: string, chunk: {
@@ -60,6 +80,9 @@ interface EdgeEverDesktopBridge {
     chrome: string;
     dataDir: string;
   }>;
+  globalShortcut(): Promise<DesktopGlobalShortcutState>;
+  setGlobalShortcut(binding: DesktopGlobalShortcutBinding | null): Promise<DesktopGlobalShortcutState>;
+  captureGlobalShortcut(capturing: boolean): Promise<boolean>;
   setAccountScope(accountId: string | null): Promise<{ ready: true; scope: string }>;
   updateStatus(): Promise<DesktopUpdateStatus>;
   checkUpdate(): Promise<DesktopUpdateStatus>;
@@ -92,9 +115,9 @@ interface EdgeEverDesktopBridge {
   finishWeChatImport?(importId: string, success: boolean): Promise<void>;
   retryWeChatImport?(importId: string): Promise<boolean>;
   listAcpAdapters?(): Promise<Array<{
-    id: "codex" | "antigravity" | "grokBuild" | "deepseekHarness" | "piAgent" | "workbuddyCn" | "workbuddyIntl";
+    id: "codex" | "claudeCode" | "antigravity" | "openClaw" | "hermesAgent" | "grokBuild" | "deepseekHarness" | "piAgent" | "workbuddyCn" | "workbuddyIntl";
     label: string;
-    state: "not_installed" | "installing" | "needs_login" | "available" | "failed";
+    state: "not_installed" | "not_probed" | "installing" | "needs_login" | "available" | "failed";
     detail?: string;
     promptCapabilities?: { image?: boolean; embeddedContext?: boolean };
     version?: string;
@@ -102,8 +125,9 @@ interface EdgeEverDesktopBridge {
     updateError?: string;
     authMethods?: Array<{ id: string; name: string }>;
   }>>;
-  probeAcpAdapter?(input: { id: "codex" | "antigravity" | "grokBuild" | "deepseekHarness" | "piAgent" | "workbuddyCn" | "workbuddyIntl"; path?: string }): Promise<{
-    id: "codex" | "antigravity" | "grokBuild" | "deepseekHarness" | "piAgent" | "workbuddyCn" | "workbuddyIntl";
+  chooseAcpAdapterPath?(): Promise<string | null>;
+  probeAcpAdapter?(input: { id: "codex" | "claudeCode" | "antigravity" | "openClaw" | "hermesAgent" | "grokBuild" | "deepseekHarness" | "piAgent" | "workbuddyCn" | "workbuddyIntl"; path?: string }): Promise<{
+    id: "codex" | "claudeCode" | "antigravity" | "openClaw" | "hermesAgent" | "grokBuild" | "deepseekHarness" | "piAgent" | "workbuddyCn" | "workbuddyIntl";
     label: string;
     state: "not_installed" | "needs_login" | "available" | "failed";
     detail?: string;
@@ -112,31 +136,32 @@ interface EdgeEverDesktopBridge {
     managed?: boolean;
     authMethods?: Array<{ id: string; name: string }>;
   }>;
-  installAcpAdapter?(id: "codex" | "antigravity" | "piAgent"): Promise<{ updated: boolean; version?: string; adapter?: {
-    id: "codex" | "antigravity" | "piAgent";
+  installAcpAdapter?(id: "codex" | "claudeCode" | "antigravity" | "piAgent"): Promise<{ updated: boolean; version?: string; adapter?: {
+    id: "codex" | "claudeCode" | "antigravity" | "piAgent";
     label: string;
     state: "not_installed" | "needs_login" | "available" | "failed";
     detail?: string;
     promptCapabilities?: { image?: boolean; embeddedContext?: boolean };
     authMethods?: Array<{ id: string; name: string }>;
   } }>;
-  authenticateAcpAdapter?(input: { id: "codex" | "antigravity" | "grokBuild" | "deepseekHarness" | "piAgent" | "workbuddyCn" | "workbuddyIntl"; path?: string; methodId: string }): Promise<{
-    id: "codex" | "antigravity" | "grokBuild" | "deepseekHarness" | "piAgent" | "workbuddyCn" | "workbuddyIntl";
+  authenticateAcpAdapter?(input: { id: "codex" | "claudeCode" | "antigravity" | "openClaw" | "hermesAgent" | "grokBuild" | "deepseekHarness" | "piAgent" | "workbuddyCn" | "workbuddyIntl"; path?: string; methodId: string }): Promise<{
+    id: "codex" | "claudeCode" | "antigravity" | "openClaw" | "hermesAgent" | "grokBuild" | "deepseekHarness" | "piAgent" | "workbuddyCn" | "workbuddyIntl";
     label: string;
     state: "not_installed" | "needs_login" | "available" | "failed";
     detail?: string;
     authMethods?: Array<{ id: string; name: string }>;
   }>;
   promptAcp?(input: {
-    adapterId: "codex" | "antigravity" | "grokBuild" | "deepseekHarness" | "piAgent" | "workbuddyCn" | "workbuddyIntl";
+    adapterId: "codex" | "claudeCode" | "antigravity" | "openClaw" | "hermesAgent" | "grokBuild" | "deepseekHarness" | "piAgent" | "workbuddyCn" | "workbuddyIntl";
     path?: string;
     prompt: string;
     contextText?: string;
     attachments?: Array<{ filename: string; mediaType: string; dataBase64: string }>;
+    noteAccess?: boolean;
   }): Promise<{ requestId: string; rejectedAttachments?: Array<{ filename: string; reason: string }> }>;
   cancelAcp?(requestId: string): Promise<{ ok: true }>;
   onAcpEvent?(callback: (event:
-    | { requestId: string; type: "text-delta"; text: string }
+    | { requestId: string; type: "text-delta"; text: string; messageId?: string }
     | { requestId: string; type: "reasoning"; text: string }
     | { requestId: string; type: "tool"; name: string; status: string; title?: string }
     | { requestId: string; type: "image"; id: string; mediaType: string; base64: string }
@@ -157,9 +182,53 @@ interface EdgeEverDesktopBridge {
   }) => void): () => void;
 }
 
+interface DesktopUpdateNetworkDiagnostic {
+  checkId: number;
+  startedAt: number | null;
+  elapsedMs: number;
+  observedSessions: string[];
+  proxyScope: string;
+  omittedRequests: number;
+  requests: Array<{
+    checkId: number;
+    requestId: string;
+    session: string;
+    stage: string;
+    url: string | null;
+    startedAt: number;
+    elapsedMs: number;
+    status: "pending" | "completed" | "failed" | "redirected";
+    httpStatus: number | null;
+    errorCode: string | null;
+    redirectUrl?: string | null;
+    proxy: { state: "pending" | "resolved" | "failed" | "timeout"; value: string | null; errorCode?: string };
+  }>;
+}
+
+interface DesktopUpdateDiagnostic {
+  at: string;
+  stage: string;
+  version: string;
+  platform: string;
+  arch: string;
+  code: string | null;
+  message: string;
+  source: string;
+  network?: DesktopUpdateNetworkDiagnostic;
+}
+
+interface DesktopUpdateDownloadProgress {
+  percent: number | null;
+  transferred: number | null;
+  total: number | null;
+  bytesPerSecond: number | null;
+}
+
 interface DesktopUpdateStatus {
   state: "idle" | "available" | "downloaded";
   version: string | null;
+  error?: DesktopUpdateDiagnostic | null;
+  progress?: DesktopUpdateDownloadProgress | null;
 }
 
 type DesktopLocalDataResetErrorCode =

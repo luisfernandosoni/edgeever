@@ -1,6 +1,7 @@
 use rusqlite::Connection;
 use serde_json::{json, Value};
 
+use crate::note_summary::note_list_metadata;
 use crate::{
     bool_param, content_hash, enqueue_change, markdown_doc, memo_remap_base_key, now_id,
     resolve_remapped_memo_base, string_param, tags_from_json,
@@ -8,7 +9,8 @@ use crate::{
 
 fn summary_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
     let tags: String = row.get("tags_json")?;
-    Ok(json!({
+    let markdown: String = row.get("content_markdown")?;
+    let mut summary = json!({
         "id": row.get::<_, String>("id")?,
         "notebookId": row.get::<_, String>("notebook_id")?,
         "title": row.get::<_, Option<String>>("title")?,
@@ -21,7 +23,12 @@ fn summary_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
         "createdAt": row.get::<_, String>("created_at")?,
         "updatedAt": row.get::<_, String>("updated_at")?,
         "deletedAt": row.get::<_, Option<String>>("deleted_at")?,
-    }))
+    });
+    let metadata = note_list_metadata(&markdown);
+    if let (Some(summary), Some(metadata)) = (summary.as_object_mut(), metadata.as_object()) {
+        summary.extend(metadata.clone());
+    }
+    Ok(summary)
 }
 
 pub(crate) fn memo_value(
@@ -217,6 +224,13 @@ pub(crate) fn empty_trash(database: &Connection) -> Result<Value, String> {
     let tx = database
         .unchecked_transaction()
         .map_err(|e| e.to_string())?;
+    let memo_ids: Vec<String> = tx
+        .prepare("SELECT id FROM memos WHERE is_deleted = 1")
+        .map_err(|e| e.to_string())?
+        .query_map([], |row| row.get(0))
+        .map_err(|e| e.to_string())?
+        .collect::<Result<_, _>>()
+        .map_err(|e| e.to_string())?;
     tx.execute(
         "DELETE FROM resources WHERE memo_id IN (SELECT id FROM memos WHERE is_deleted = 1)",
         [],
@@ -226,7 +240,12 @@ pub(crate) fn empty_trash(database: &Connection) -> Result<Value, String> {
         .execute("DELETE FROM memos WHERE is_deleted = 1", [])
         .map_err(|e| e.to_string())?;
     tx.commit().map_err(|e| e.to_string())?;
-    enqueue_change(database, "memo.emptyTrash", "trash", &json!({}))?;
+    enqueue_change(
+        database,
+        "memo.emptyTrash",
+        "trash",
+        &json!({ "memoIds": memo_ids }),
+    )?;
     Ok(json!({ "ok": true, "deleted": deleted }))
 }
 
@@ -440,7 +459,7 @@ pub(crate) fn list_memos(database: &Connection, params: &Value) -> Result<Value,
             )){filter}"
     );
     let query = format!("SELECT m.id, m.notebook_id, m.title, m.excerpt, m.tags_json, m.is_pinned, m.is_archived, m.is_deleted,
-                c.revision, m.created_at, m.updated_at, m.deleted_at
+                c.revision, m.created_at, m.updated_at, m.deleted_at, c.content_markdown
            FROM memos m JOIN memo_contents c ON c.memo_id = m.id
           WHERE {where_clause}
           ORDER BY {order} LIMIT ?6 OFFSET ?7");
@@ -528,7 +547,7 @@ pub(crate) fn create_memo(database: &Connection, params: &Value) -> Result<Value
 
 pub(crate) fn update_memo(database: &Connection, params: &Value) -> Result<Value, String> {
     let memo_id = string_param(params, "memoId")?;
-    let previous = memo_value(database, &memo_id, true)?;
+    let mut previous = memo_value(database, &memo_id, true)?;
     let requested_revision = params
         .get("expectedRevision")
         .and_then(Value::as_i64)
@@ -581,6 +600,40 @@ pub(crate) fn update_memo(database: &Connection, params: &Value) -> Result<Value
     let tx = database
         .unchecked_transaction()
         .map_err(|e| e.to_string())?;
+    let guarded = params.get("expectedLocalSnapshot");
+    if let Some(expected) = guarded {
+        previous = memo_value(&tx, &memo_id, true)?;
+        let fields = [
+            "revision",
+            "contentHash",
+            "title",
+            "tags",
+            "contentMarkdown",
+            "contentJson",
+        ];
+        if previous
+            .get("isDeleted")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+            || fields
+                .iter()
+                .any(|key| expected.get(*key).is_none() || previous.get(*key) != expected.get(*key))
+        {
+            return Err(
+                "NOTE_CONFLICT: The note changed locally. Read it again before editing.".to_owned(),
+            );
+        }
+        let conflicts: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM _edgeever_sidecar_outbox WHERE entity_id = ?1 AND status = 'conflict'",
+            [&memo_id], |row| row.get(0),
+        ).map_err(|e| e.to_string())?;
+        if conflicts > 0 {
+            return Err(
+                "NOTE_CONFLICT: Resolve the note's sync conflict before editing from a plugin."
+                    .to_owned(),
+            );
+        }
+    }
     insert_revision(&tx, &previous, "desktop")?;
     let changed = tx.execute("UPDATE memos SET title = ?2, excerpt = ?3, tags_json = ?4, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'), updated_by = 'desktop' WHERE id = ?1 AND is_deleted = 0", rusqlite::params![memo_id, if title.is_empty() { None } else { Some(title) }, text.chars().take(180).collect::<String>(), tags.to_string()]).map_err(|e| e.to_string())?;
     if changed == 0 {
@@ -591,18 +644,21 @@ pub(crate) fn update_memo(database: &Connection, params: &Value) -> Result<Value
     // look newer than the cloud and produces a false revision conflict once
     // the coalesced outbox item is synced.
     tx.execute("UPDATE memo_contents SET content_json = ?2, content_markdown = ?3, content_text = ?4, content_hash = ?5, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE memo_id = ?1", rusqlite::params![memo_id, content_json_text, markdown, text, hash]).map_err(|e| e.to_string())?;
+    let payload = json!({
+        "memoId": memo_id, "expectedRevision": expected_revision,
+        "expectedContentHash": expected_content_hash,
+        "title": params.get("title").and_then(Value::as_str).unwrap_or(""),
+        "contentJson": content_json, "contentMarkdown": markdown, "tags": tags
+    });
+    // Plugin edits commit the memo, history and outbox together. Ordinary editor
+    // writes retain their established behavior.
+    if guarded.is_some() {
+        enqueue_change(&tx, "memo.update", &memo_id, &payload)?;
+    }
     tx.commit().map_err(|e| e.to_string())?;
-    enqueue_change(
-        database,
-        "memo.update",
-        &memo_id,
-        &json!({
-            "memoId": memo_id, "expectedRevision": expected_revision,
-            "expectedContentHash": expected_content_hash,
-            "title": params.get("title").and_then(Value::as_str).unwrap_or(""), "contentJson": content_json,
-            "contentMarkdown": markdown, "tags": tags
-        }),
-    )?;
+    if guarded.is_none() {
+        enqueue_change(database, "memo.update", &memo_id, &payload)?;
+    }
     if consumed_remap_base {
         database
             .execute(

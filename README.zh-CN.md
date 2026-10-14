@@ -11,15 +11,16 @@
     <a href="https://github.com/tianma-if/edgeever/pkgs/container/edgeever"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fghcr-badge.elias.eu.org%2Fapi%2Ftianma-if%2Fedgeever%2Fedgeever&query=downloadCount&style=social&logo=docker&label=Docker%20Pulls" alt="Docker Pulls" /></a>
     <a href="https://www.producthunt.com/products/edgeever?utm_source=other&utm_medium=social"><img src="https://img.shields.io/badge/Product%20Hunt-ea532a?style=social&logo=product-hunt" alt="Product Hunt" /></a>
     <a href="https://hellogithub.com/repository/tianma-if/edgeever" target="_blank"><img src="https://api.hellogithub.com/v1/widgets/recommend.svg?rid=150fee4403f6433880bda91e9576ac06&claim_uid=TWNAjisURpnhL1l&theme=small" alt="Featured｜HelloGitHub" /></a>
-    <a href="https://afdian.com/a/tianma-if"><img src="https://img.shields.io/badge/爱发电-946ce6?style=social&logo=github-sponsors" alt="爱发电赞助" /></a>
+    <a href="#赞助与支持"><img src="https://img.shields.io/badge/Sponsor-支持项目-ea4aaa?logo=github-sponsors" alt="赞助与支持" /></a>
   </p>
   <p>
-    <b>简体中文</b> | <a href="README.zh-TW.md">繁體中文</a> | <a href="README.md">English</a> | <a href="README.ja.md">日本語</a>
+    <b>简体中文</b> | <a href="README.zh-TW.md">繁體中文</a> | <a href="README.md">English</a> | <a href="README.ja.md">日本語</a> | <a href="README.pl-PL.md">Polski</a>
   </p>
   <p>
-    <a href="#wechat-group">💬 微信交流群</a> &nbsp;|&nbsp;
+    <a href="#wechat-group"><img src="assets/readme/community/wechat.svg" alt="WeChat" width="16" height="16" align="absmiddle" /> 微信交流群</a> &nbsp;|&nbsp;
     <a href="https://demo.edgeever.org">🌐 在线演示</a> &nbsp;|&nbsp;
-    <a href="#客户端下载">📱 客户端下载</a>
+    <a href="#客户端下载">📱 客户端下载</a> &nbsp;|&nbsp;
+    <a href="#features">核心特性与场景</a>
   </p>
 </div>
 
@@ -36,15 +37,12 @@ EdgeEver 是一款现代化的开源笔记与个人知识库工作区。它为�
 
 很多长期使用**印象笔记**的用户，核心需求只是一个**可靠、开放、响应迅速**的个人知识库。然而，当下的主流方案都各有痛点：
 
-* **印象笔记**：功能日益臃肿，商业广告与繁杂附加功能充斥，性能与内存占用居高不下；且数据相对封闭难以导出，免费版限制重重，支持 AI/MCP 的套餐订阅成本高昂。
+* **印象笔记**：陪伴了作者近 10 年、感情最深的笔记产品。然而随着它演进为全功能商业套件，广告与附加功能渐多，系统开销也随之走高；加之免费版配额收紧、高级 AI 订阅昂贵，且难以灵活接入现代自托管与私有 AI 工作流。
 * **Obsidian**：Markdown 开放，核心闭源；官方同步收费，第三方同步繁琐；纯本地文件依赖遍历扫描，当笔记积累到数千上万条或加载复杂插件后，冷启动与全库检索明显卡顿迟缓；图片与附件与文本混存，仓库体积极易膨胀导致移动端同步缓慢，且删笔记后残留附件难清理；对于“随时随地随手记”的轻量场景来说偏重。
 * **Memos / Flomo 等轻量笔记**：虽然简单好用，但流式卡片布局与习惯了经典“三栏工作流”的用户有着天然的交互习惯差异。
 * **思源笔记等块级知识库**：功能深厚且支持开源自托管，但全面的“块级（Block）”架构使得日常随手记录与连续排版书写的心智负担偏重；且缺少零服务器成本的 Serverless 部署形态，多端同步主要依赖官方付费订阅，或需额外付费解锁 S3/WebDAV 同步特性并自备存储。
 
 **EdgeEver 恰好填补了这一空白**：整栈开源，云同步与自托管都可自行部署；同时保留经典三栏布局与流畅排版，万条笔记常驻依然轻盈丝滑，原生支持接入 AI Agent，部署维护零门槛、零费用。
-
-> 💡 **最佳实践推荐：**
-> 全端随时捕捉灵感与素材，在经典三栏中深度整理沉淀；借助原生 MCP 与 ACP 协议，既能让外部 Agent 随时检索与整理笔记，也可在桌面端直接调用本机 AI Agent 深度协同；对外一键排版发布，全量数据 0 成本自托管，打造开放互联、真正属于你的智能第二大脑。
 
 ## 在线演示
 
@@ -64,33 +62,35 @@ EdgeEver 是一款现代化的开源笔记与个人知识库工作区。它为�
 
 > iOS 客户端需要使用非中国大陆区 Apple ID 下载。
 
-## 功能
+<a id="features"></a>
+## 核心特性与场景
 
-- **自由选择部署方式**：既可免费运行于 Cloudflare Serverless，也可通过 Docker 部署到 VPS、NAS 或家庭服务器。按 Cloudflare 免费存储额度估算，个人部署可容纳约 15 万条短笔记和约 5 万张图片；Docker 存储可按需扩展，轻松承载百万级笔记与海量图片。
-- **数据开放，不设围墙**：基于标准 SQLite 存储，提供 REST API、MCP 与 CLI 接口。数据随时可读可导，不再担心被任何特定平台绑定。
-- **无损 ZIP 打包与无缝迁移**：一键打包导出包含 Markdown、Front Matter、嵌套目录及附件的完整档案，同时保留历史版本与结构化数据，方便在不同实例间完整还原。
-- **原生 AI Agent 智脑联动**：内置 MCP（Model Context Protocol）协议，支持外部 AI Agent 直接读取与整理笔记；同时桌面端支持通过 ACP（Agent Client Protocol）协议直接调用本机运行的 AI Agent（如 Codex、Antigravity、Claude Code、WorkBuddy 等）协同创作。
-- **接入自己的 AI 模型**：支持添加多个 OpenAI、Anthropic、Gemini 兼容服务与第三方中转平台，驱动内置 Agent，在伴侣侧边栏与编辑器中随时对全文或选区进行智能总结、要点提炼、语法校对、翻译与续写润色。
-- **丰富的插件 API**：可通过[插件开发文档](docs/plugin-development.zh-CN.md)扩展 EdgeEver。
-- **多端无缝同步，无设备限制**：自托管数据无商业限制，摆脱免费账号仅限 2 台设备的束缚，在 PC、平板与手机上随心同步。
-- **经典三栏布局与专注模式**：笔记本树、笔记列表与编辑区一目了然；桌面端一键开启专注模式，让思绪尽情铺满屏幕。
-- **桌面端轻快省内存**：切笔记不会堆积旧图和旧文档，长时间挂在后台也保持流畅。
-- **无限层级笔记本**：轻松构建清晰的多级目录结构。
-- **微信公众号一键排版与复制**：专为中文创作者设计，支持将笔记一键转换为带行内样式的公众号美化格式，直接复制粘贴至微信公众号后台，告别复杂的第三方排版工具。
-- **优雅的双视图编辑**：桌面端支持在富文本与 Markdown 源码视图之间自由切换。
-- **单篇笔记便捷导出**：可将当前笔记直接导出为 Markdown、HTML 或 PDF，方便独立保存、分享与发布。
-- **Mermaid 架构图与流程图渲染**：原生支持 Mermaid 代码块渲染，视图切换时完整保留可编辑源码，让绘制逻辑图表更直观。
-- **可视化图表笔记**：告别外部绘图软件，在笔记内即可直观绘制思维导图、流程图与架构图；基于结构化 IR，内置助手与外部 AI Agent 可一句话智能生成与修改图表，支持自动布局、全端同步及矢量导出。详见[可视化图表笔记设计说明](docs/visual-diagram-notes.zh-CN.md)。
-- **笔记历史版本回溯**：自动记录修改历史，随时查阅与还原过往版本。
-- **公开笔记分享**：支持公开分享笔记，并可随时取消分享；需要时可为分享链接开启自动生成的访问密码。
-- **移动 App 微信公众号文章剪藏**：在手机上将微信公众号文章分享至 EdgeEver，即可提取正文并保存为可继续编辑的笔记。
-- **智能前端图片压缩**：图片上传前在浏览器端静默完成压缩，常见截图与大图精简 50%-90% 体积，加载更迅速、存储更省心。
-- **通用文件附件支持**：支持轻松上传并插入 PDF、Office 文档、压缩包及音视频等各种附件；通过分片上传与流式处理，安全支持最大 1 GiB 附件。
-- **高效多选与批量操作**：支持笔记批量合并、批量移动，以及笔记本拖拽排序与层级调整。
-- **离线草稿与同步队列**：网络不稳定时自动保存离线草稿，恢复连线后自动入队同步。
-- **登录防暴力破解保护**：服务端按账号与 IP 记录失败登录并自动限流、冷却，降低暴力破解与密码喷洒攻击风险，守护私密笔记数据。
-- **多账号与个人空间隔离**：单实例支持创建多个独立账号，用户数据相互隔离，配备直观的管理员账号管理与安全加密机制。
-- **全平台多端覆盖**：支持 Web、[Android](https://play.google.com/store/apps/details?id=org.edgeever.mobile)、[macOS](https://github.com/tianma-if/edgeever/releases)、[Windows](https://github.com/tianma-if/edgeever/releases/latest)、[Linux](https://github.com/tianma-if/edgeever/releases/latest) 和 [iOS](https://apps.apple.com/us/app/edgeever/id6792625631)；网页裁剪插件支持 [Chrome](https://chromewebstore.google.com/detail/edgeever-web-clipper/gjadpfmanienmlofajibkfkkpfdkclgo)、[Edge](https://chromewebstore.google.com/detail/edgeever-web-clipper/gjadpfmanienmlofajibkfkkpfdkclgo) 和 [Firefox](https://addons.mozilla.org/zh-CN/firefox/addon/edgeever-web-clipper/)。
+从跨渠道内容捕获到深度知识表达与业务协作，EdgeEver 为个人与团队提供了高效流畅的端到端工作流：
+
+### 全渠道剪藏与多媒体沉淀
+- **跨平台一键剪藏**：浏览器插件支持[小红书画廊](docs/best-practices.zh-CN.md#2-小红书图文笔记一键剪藏)、[X (Twitter) 推文与引用](docs/best-practices.zh-CN.md#3-x-twitter-推文与引用一键剪藏)、[知乎问答](docs/best-practices.zh-CN.md#4-知乎回答与文章一键精准剪藏)、[Reddit 讨论帖](docs/best-practices.zh-CN.md#5-reddit-讨论帖一键剪藏)与 [GitHub 仓库](docs/best-practices.zh-CN.md#8-github-开源仓库信息一键剪藏)（更多社媒平台深度适配敬请期待）；手机端通过系统分享一键转存[全网图片](docs/best-practices.zh-CN.md#9-移动端社媒图片一键转存笔记)与[微信公众号文章](docs/best-practices.zh-CN.md#10-手机端一键剪藏微信公众号文章)。
+- **微信聊天记录完整归档**：macOS 端支持在微信中将聊天记录「转发到其他应用 → EdgeEver」，一键整段导入为结构化笔记，完整保留发言人、时间轴、引用回复及微信表情，图片自动内嵌，视频与文件自动转为笔记附件。详见[微信聊天记录一键归档与整理](docs/best-practices.zh-CN.md#1-微信聊天记录一键归档与整理)。
+- **通用文件附件与端侧图片压缩**：支持轻松上传并插入 PDF、Office 文档、压缩包及音视频等各种附件，分片上传与流式处理安全支持最大 1 GiB 附件；图片上传前在浏览器端静默完成压缩，常见截图与大图精简 50%-90% 体积，加载更迅速、存储更省心。
+
+### 智能可视化与多维数据协作
+- **全类型可视化图表与专业信息图**：告别外部绘图软件，借助伴随式 AI 助手自然语言一句话生成可交互编辑的[思维导图、流程图与架构图](docs/best-practices.zh-CN.md#11-ai-对话一键生成思维导图流程图与架构图)（详见[可视化图表笔记设计说明](docs/visual-diagram-notes.zh-CN.md)，原生支持 Mermaid 代码块渲染）；内置丰富模板库，一键生成精美专业的[全类型可视化信息图（时间线、对比图、象限矩阵等）](docs/best-practices.zh-CN.md#12-ai-智能生成专业信息图时间线对比图架构图等)。
+- **AI 多维表格与在线收集表单**：自然语言一句话按需搭建[任意业务场景多维表格](docs/best-practices.zh-CN.md#13-借助右侧-ai-助手一句话生成多维表格)（如项目管理、选题库、人事资产等），自动推断单选标签、日期等字段类型并预置真实示例数据；支持一键开启无需登录的[对外公开在线收集表单](docs/best-practices.zh-CN.md#14-多维表格一键生成在线公开收集表单)，用户填报数据实时沉淀入库。
+- **双视图编辑与空间组织**：桌面端支持在富文本与 Markdown 源码视图之间自由切换；经典三栏布局与一键专注模式，无限层级笔记本，支持笔记批量合并/移动与拖拽排序；提供自动版本回溯与带密码保护的公开笔记分享。
+
+### 创作者排版与一键分发
+- **微信公众号一键排版与复制**：专为中文创作者设计，支持将笔记一键转换为带行内样式的公众号美化格式，[一键复制内联富文本到微信公众号](docs/best-practices.zh-CN.md#6-一键复制笔记到微信公众号排版)后台直接粘贴发布，告别第三方排版工具。
+- **高颜值长图分享与多格式导出**：任意笔记均可一键[分享为精美长图海报](docs/best-practices.zh-CN.md#7-ai-rss-智能订阅日报与精美长图分享)，内置 8 款主题风格、自定义字体与卡片版式，优雅分发至社交媒体；支持单篇笔记独立便捷导出为 Markdown、HTML 或 PDF。
+- **AI RSS 智能订阅日报**：内置官方 AI RSS 订阅插件，自动定时聚合行业资讯与博客源，AI 过滤噪音并生成结构严谨、重点清晰的精炼日报笔记。
+
+### 原生 AI Agent 与开放生态
+- **原生 Agent 协议深度互联（MCP & ACP）**：内置 MCP（Model Context Protocol）协议，支持外部 AI Agent 直接读取与整理笔记；桌面端支持通过 ACP（Agent Client Protocol）协议直接调用本机运行的 AI Agent（如 Codex、Antigravity、Claude Code、WorkBuddy 等）协同创作。
+- **接入自有模型与开放插件 API**：支持添加多个 OpenAI、Anthropic、Gemini 兼容服务与第三方中转平台，在伴侣侧边栏与编辑器中随时对全文或选区进行智能总结、提炼、翻译与润色；提供丰富的[插件开发 API](docs/plugin-development.zh-CN.md)自由扩展功能。
+
+### 开放架构、全端体验与安全基座
+- **自由部署与数据无围墙**：既可免费运行于 Cloudflare Serverless（个人免费额度约容纳 15 万条短笔记与 5 万张图片），也可通过 Docker 部署到 VPS、NAS 或家庭服务器（轻松承载百万级笔记与海量图片）；基于标准 SQLite 存储，提供 REST API、CLI 接口与无损 ZIP 档案导出导入，数据完全自主不设围墙。
+- **全平台覆盖与稳定安全**：官方覆盖 Web、[Android](https://play.google.com/store/apps/details?id=org.edgeever.mobile)、[macOS](https://github.com/tianma-if/edgeever/releases)、[Windows](https://github.com/tianma-if/edgeever/releases/latest)、[Linux](https://github.com/tianma-if/edgeever/releases/latest) 及 [iOS](https://apps.apple.com/us/app/edgeever/id6792625631)（网页裁剪插件支持 [Chrome](https://chromewebstore.google.com/detail/edgeever-web-clipper/gjadpfmanienmlofajibkfkkpfdkclgo)、[Edge](https://chromewebstore.google.com/detail/edgeever-web-clipper/gjadpfmanienmlofajibkfkkpfdkclgo) 和 [Firefox](https://addons.mozilla.org/zh-CN/firefox/addon/edgeever-web-clipper/)），自托管多端同步无设备数量限制；桌面端轻快省内存，支持离线草稿与同步队列、服务端防暴力破解限流保护，以及多账号空间数据隔离。
+
+👉 查看全部 14 个实机演示与操作效果：**[完整场景与最佳实践指南](docs/best-practices.zh-CN.md)**
 
 ## 部署
 
@@ -98,7 +98,7 @@ Cloudflare 是推荐的零服务器部署方式；希望使用 VPS、NAS 或家�
 
 Cloudflare 在线部署可以选择以下两种方式之一：
 
-### 方案一：AI Agent 一键部署（推荐）
+### 方案一：交给 AI Agent 部署（推荐）
 
 将下方提示词直接复制发送给 AI Agent（如 Codex、Claude、Cursor、WorkBuddy、Antigravity、OpenClaw、Hermes Agent 等）。执行过程中，如需访问 GitHub 或 Cloudflare，请确认权限范围并按提示完成授权。
 
@@ -169,7 +169,7 @@ curl -fsSL https://edgeever.org/install.sh | bash
 
 - **智能正文提取**：自动提取网页文章正文并转为纯净 Markdown，自动保留来源网址与剪藏时间。
 - **划选与右键剪藏**：选中局部文字或右键任意图片直接存为独立笔记，无需抓取整页冗余内容。
-- **X (Twitter) 推文剪藏**：右键单条推文自动展开长文全文，连同作者、发布时间与配图完整归档。
+- **社媒与社区深度剪藏**：深度适配 X (Twitter)、小红书、知乎、Reddit 与 GitHub，一键发送。
 - **自托管隐私直连**：剪藏内容直传个人自托管实例，不经过任何第三方服务器中转。
 
 ## 社区与反馈
@@ -181,12 +181,12 @@ curl -fsSL https://edgeever.org/install.sh | bash
 
 <h3 id="wechat-group">微信交流群</h3>
 
-欢迎加入 EdgeEver AI 交流群，这里聚集了大量 Vibe Coding 与 AI 玩家。一起交流 EdgeEver 体验、AI Agent 实战落地、高性价比/免费 AI 资源及自动化工作流。
+欢迎加入 EdgeEver AI 交流群，这里聚集了大量 Vibe Coding 与 AI 玩家。一起交流前沿 AI 生产力与个人知识库的最佳实践。
 
-> 群二维码 7 天内有效。如果二维码过期，请添加微信 `m1245207870`，并备注“EdgeEver 进群”。
+> 扫描下方二维码或添加微信 `m1245207870`（备注“EdgeEver 进群”），群主将手动邀请入群。
 
 <p align="center">
-  <img src="assets/wechat-group-qr.jpg" alt="EdgeEver AI 交流群二维码" width="260" />
+  <img src="assets/wechat-group-qr.jpg" alt="微信联系人二维码" width="260" />
 </p>
 
 ## 插件与主题
@@ -249,10 +249,10 @@ content_text      搜索、摘要和索引使用
 
 ## MCP
 
-在 **个人中心** -> **MCP 设置** 中创建 API Token 并交给 AI Agent，即可让 Agent 在账号授权范围内安全地管理你的知识库。系统同时支持文本笔记与图表笔记（涵盖思维导图、流程图和架构图三种），支持对这些笔记进行完整的增删改查；Agent 还可根据字段方案创建多维表格笔记、编辑字段，并读取、新增、修改和删除表格记录，同时管理笔记模板与 AI 指令。
+在 **个人中心** -> **API / MCP** 中创建 API Token 并一键复制 Remote MCP 配置，即可让 Claude Code、Cursor、Antigravity、OpenClaw 等 AI Agent 在账号授权范围内安全管理你的知识库。系统支持文本笔记、图表笔记（思维导图、流程图与架构图）和多维表格笔记的完整增删改查，Agent 还可管理笔记本目录、标签、附件、历史版本、笔记模板与 AI 指令。
 
 > 💡 **场景启发：**
-> 让 AI 真正成为你的知识管家与创作外脑——不仅能将方案秒级生成为可交互的思维导图与架构图，还能为 AI Agent 提供私有上下文。依托 EdgeEver 强大的富文本编辑与精美排版能力，AI 协同沉淀的不再是冰冷文本，而是结构工整、排版优雅、随时可一键分发的高品质知识资产。
+> 让 AI 真正成为你的知识管家与创作外脑——不仅能将方案秒级生成为可交互的思维导图、流程图、架构图与多维表格，还能为 AI Agent 提供私有知识上下文。依托 EdgeEver 强大的富文本编辑与精美排版能力，AI 协同沉淀的不再是冰冷文本，而是结构工整、排版优雅、随时可一键分发的高品质知识资产。
 
 ## 图片压缩规则
 
@@ -280,11 +280,18 @@ Docker 与 Cloudflare 共用同一套前端、API 路由、业务服务、鉴权
 
 Web、PWA 与桌面端会在停止编辑 30 秒后上传笔记，并在页面可见时每 5 分钟检查云端变更；窗口聚焦与手动刷新仍会立即拉取。可在 [`apps/web/src/lib/workspace-refresh.ts`](apps/web/src/lib/workspace-refresh.ts) 中调整 `DEFERRED_MEMO_SYNC_DELAY_MS` 和 `BACKGROUND_WORKSPACE_REFRESH_INTERVAL_MS`。
 
+## 赞助与支持
+
+EdgeEver 是免费开源项目。保持跨平台客户端（macOS、Windows、Linux、iOS、Android）的持续演进、真机测试、证书签名以及多运行时生态建设，都需要长期的精力与资源投入。
+
+- [支持 EdgeEver](docs/sponsor.zh-CN.md) —— 通过微信支付或支付宝自愿赞助
+- [赞助商与合作伙伴](docs/partners.zh-CN.md) —— 支持基础设施、开发工具、服务或社区合作
+
 ## 致谢
 
-- EdgeEver 的笔记产品设计也参考了 [Evernote（印象笔记）](https://evernote.com/) 等成熟笔记工具的公开产品体验。相关功能由 EdgeEver 独立设计与实现。
+- EdgeEver 的笔记产品设计也参考了 [Evernote（印象笔记）](https://evernote.com/)、[Notion](https://www.notion.com/) 等成熟笔记工具的公开产品体验。相关功能由 EdgeEver 独立设计与实现。
 - 思维导图与可视化图表笔记的产品设计参考了 [XMind](https://xmind.com/) 和 [ProcessOn](https://www.processon.com/) 等图表工具的公开产品体验。相关功能由 EdgeEver 独立设计与实现。
-- 编辑器主题的排版架构、标题层级与章节结构参考了 [obsidian-minimal](https://github.com/kepano/obsidian-minimal)、[Outline](https://github.com/outline/outline) 和 [墨格](https://moyufang.cn/editor) 的公开方案。名称、素材与实现均由 EdgeEver 独立完成。
+- EdgeEver 的海报设计工作台借鉴了向阳乔木（joeseesun）的 [Qiaomu Design](https://github.com/joeseesun/qiaomu-cover-design)，并基于其 MIT 开源许可改编了模板与字体排版引擎。
 
 ## 商标与品牌使用
 

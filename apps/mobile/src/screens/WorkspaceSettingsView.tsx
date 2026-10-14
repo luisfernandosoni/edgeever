@@ -52,6 +52,7 @@ const MOBILE_LOCALE_OPTIONS: Array<{ label: string; value: MobileLocalePreferenc
   { label: "简体中文", value: "zh-CN" },
   { label: "English", value: "en-US" },
   { label: "日本語", value: "ja" },
+  { label: "Polski", value: "pl" },
 ];
 type SettingsTab = "general" | "account" | "system";
 export type MobileLocaleMode = MobileLocalePreference;
@@ -89,7 +90,10 @@ export const SettingsView = ({
   onClose,
   onImageCompressionChange,
   onLocalePreferenceChange,
+  onShowDescendantNotesChange,
   onSignOut,
+  showDescendantNotes,
+  showDescendantNotesSaveFailed,
 }: {
   currentUser: AuthUser | null;
   imageCompressionEnabled: boolean;
@@ -97,7 +101,10 @@ export const SettingsView = ({
   onClose: () => void;
   onImageCompressionChange: (enabled: boolean) => void;
   onLocalePreferenceChange: (locale: MobileLocaleMode) => void;
+  onShowDescendantNotesChange: (enabled: boolean) => void;
   onSignOut: () => void;
+  showDescendantNotes: boolean;
+  showDescendantNotesSaveFailed: boolean;
 }) => {
   const { resolvedTheme, toggleTheme } = useMobileTheme();
   const { translate } = useMobileLocale();
@@ -217,6 +224,17 @@ export const SettingsView = ({
                 </View>
                 <View style={styles.settingsSwitchStart}>
                   <Switch accessibilityLabel={translate("是否压缩笔记内图片")} onValueChange={onImageCompressionChange} value={imageCompressionEnabled} />
+                </View>
+              </View>
+            </View>
+            <View style={styles.settingsContentRow}>
+              <View style={styles.preferenceStack}>
+                <View style={styles.preferenceText}>
+                  <Text style={styles.settingsRowTitle}>父笔记本中显示子笔记本笔记</Text>
+                  {showDescendantNotesSaveFailed ? <Text accessibilityRole="alert" style={styles.errorText}>无法保存“父笔记本中显示子笔记本笔记”设置，请稍后重试</Text> : null}
+                </View>
+                <View style={styles.settingsSwitchStart}>
+                  <Switch accessibilityLabel={translate("是否在父笔记本中显示子笔记本中的笔记")} onValueChange={onShowDescendantNotesChange} value={showDescendantNotes} />
                 </View>
               </View>
             </View>
@@ -530,6 +548,7 @@ const getMobileSystemInfoText = (localePreference: MobileLocaleMode) =>
         followSystem: "Follow system",
         installMode: "Mode",
         instanceBuild: "Instance build",
+        deploymentVersionTime: "Instance deployment time",
         instanceConnection: "Instance connection",
         instanceUrl: "Instance URL",
         instanceVersion: "Instance version",
@@ -579,6 +598,7 @@ const getMobileSystemInfoText = (localePreference: MobileLocaleMode) =>
         followSystem: "跟随系统",
         installMode: "安装形态",
         instanceBuild: "实例构建",
+        deploymentVersionTime: "实例部署时间",
         instanceConnection: "实例连接",
         instanceUrl: "实例地址",
         instanceVersion: "实例版本",
@@ -741,6 +761,12 @@ const getMobileSystemInfoGroups = (
         { label: copy.databaseBackend, value: getMobileDatabaseBackend(instance?.health.storage?.database, copy.unknown) },
         { label: copy.deploymentPlatform, value: getMobileDeploymentPlatform(instance?.health.runtime, english) },
         { label: copy.instanceBuild, mono: true, value: instance?.health.build || copy.unknown, wide: true },
+        {
+          label: copy.deploymentVersionTime,
+          value: instance?.health.deploymentVersionCreatedAt && Number.isFinite(Date.parse(instance.health.deploymentVersionCreatedAt))
+            ? new Intl.DateTimeFormat(english ? "en-US" : "zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(instance.health.deploymentVersionCreatedAt))
+            : copy.unknown,
+        },
         { fullWidth: true, label: copy.newUploadObjectStorage, value: getMobileObjectStorage(instance?.health, english, copy.unknown) },
         ...(instance?.health.objectStorageProvider === "s3"
           ? [{ fullWidth: true, label: copy.existingAttachments, value: copy.existingAttachmentsOriginalStorage }]

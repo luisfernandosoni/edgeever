@@ -1,29 +1,23 @@
 {
-  "version": "1.94.0",
+  "version": "1.118.0",
   "changes": {
     "en-US": [
-      "Copy a whole note to WeChat from its card menu. The open note includes unsaved edits. Quotes, code, headings, rules, and formulas follow the light editor, and task checkboxes stay visible.",
-      "Note headers no longer show the updated time, and titles stay visible in narrow desktop windows. One toolbar button switches between rich text and Markdown, and its tooltip names the mode that click will open.",
-      "Attachments show a dedicated icon for installers, design files, 3D and CAD models, scripts and logs, certificates and keys, mind maps, ebooks, fonts, disk images, and databases.",
-      "The local Agent shows the selected program name, keeps its chats on this device, and displays generated images in the sidebar. Its settings description is shorter and the connection status is easier to read.",
-      "New web clips on Android and iOS store the source, time, and fetch-failure note in the current app language. Notes already saved stay as they are.",
-      "In-app feedback opens a GitHub issue form with system information already filled in."
+      "Publish notebooks and their descendants as a browsable website with live content, directory navigation, and optional password protection.",
+      "Manage note and notebook shares more clearly, retry revocation, and view newly generated share passwords across devices. Regenerate older share passwords once to enable cross-device viewing; their existing access remains valid.",
+      "Preserve failed desktop share imports across restarts, restore WorkBuddy sign-in after connection failures, and clarify the current note context for local AI agents.",
+      "Use softer button colors and clearer inbox deletion guidance."
     ],
     "zh-CN": [
-      "笔记卡片菜单可以把整篇笔记复制到微信。正在编辑的笔记会带上未保存的修改；引用、代码、标题、分隔线和公式会按浅色编辑器的样子贴过去，任务勾选也会保留。",
-      "笔记标题栏不再显示更新时间，窄窗口里标题也不会被挤没。富文本和 Markdown 改由同一个按钮切换，提示会写明即将打开的模式。",
-      "附件会按类型显示专用图标，覆盖安装包、设计稿、三维与 CAD、脚本和日志、证书密钥、思维导图、电子书、字体、磁盘镜像和数据库。",
-      "本机 Agent 会显示所选程序的名字，对话留在这台设备上，生成的图片也会出现在侧栏。设置里的说明更短，连接状态更清楚。",
-      "Android 和 iOS 新剪藏的网页，来源、时间和抓取失败说明会跟当前应用语言。已经保存的笔记保持原样。",
-      "应用内反馈会打开已经填好系统信息的 GitHub Issue 表单。"
+      "支持将笔记本及全部子笔记本发布为公开网站，提供目录导航、内容同步和可选密码保护。",
+      "优化笔记与笔记本的分享管理、状态提示和撤销重试，并支持跨设备查看新生成的分享密码。旧分享密码仍可访问，需重新生成一次才能跨设备查看。",
+      "桌面端导入失败的分享内容可在重启后保留，修复 WorkBuddy 连接失败后的登录入口，并明确本地 AI 工具的当前笔记上下文。",
+      "优化按钮配色与收件箱删除提示。"
     ],
     "ja": [
-      "カードメニューからノート全体を微信へコピーできます。開いているノートは未保存の変更を含み、引用、コード、見出し、区切り線、数式はライトエディタに揃い、タスクのチェックも残ります。",
-      "ノートのヘッダーから更新時刻を外し、狭いウィンドウでもタイトルが見えるようにしました。リッチテキストと Markdown は同じボタンで切り替え、ツールチップには次に開くモードが表示されます。",
-      "添付ファイルは、インストーラ、デザインファイル、3D と CAD、スクリプトとログ、証明書と鍵、マインドマップ、電子書籍、フォント、ディスクイメージ、データベースごとに専用アイコンを表示します。",
-      "ローカル Agent は選択中のプログラム名を表示し、会話をこのデバイスに残し、生成した画像をサイドバーに出します。設定の説明は短くなり、接続状態も見やすくなりました。",
-      "Android と iOS の新しいウェブクリップは、出典、時刻、取得失敗の説明を現在のアプリ言語で保存します。保存済みのノートはそのままです。",
-      "アプリ内のフィードバックは、システム情報を記入済みの GitHub Issue フォームを開きます。"
+      "ノートブックと配下の内容を、目次・更新反映・任意のパスワード保護付きの公開サイトとして共有できます。",
+      "共有管理・状態表示・取り消しの再試行を改善し、新しく生成した共有パスワードを端末間で確認できます。既存のパスワードは引き続き利用でき、再生成すると端末間で確認できます。",
+      "デスクトップで失敗した共有インポートを再起動後も保持し、接続失敗後の WorkBuddy ログインとローカル AI の現在のノートの認識を改善しました。",
+      "ボタンの配色と受信箱の削除案内を改善しました。"
     ]
   }
 }

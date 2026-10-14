@@ -7,7 +7,7 @@ globalThis.IDBKeyRange = IDBKeyRange;
 const { localDb } = await import("./local-db.ts");
 const { api } = await import("./api.ts");
 const { createWebRepository } = await import("./repository.ts");
-const { createLocalMemo } = await import("./local-mirror.ts");
+const { createLocalMemo, putLocalMemo } = await import("./local-mirror.ts");
 
 const installTestWindow = ({ hostname = "localhost" } = {}) => {
   const previousWindow = globalThis.window;
@@ -36,6 +36,24 @@ afterEach(async () => {
 });
 
 describe("web repository offline boundaries", () => {
+  test("empty trash records the removed memo ids for conflict cleanup after sync", async () => {
+    const restoreWindow = installTestWindow();
+    const scope = "https://demo.edgeever.org|user-1";
+    const trashed = await createLocalMemo(scope, { notebookId: "nb-1" });
+    const active = await createLocalMemo(scope, { notebookId: "nb-1" });
+    await putLocalMemo(scope, { ...trashed, isDeleted: true });
+    try {
+      expect(await createWebRepository(scope).emptyTrash()).toEqual({ ok: true, deleted: 1 });
+      await putLocalMemo(scope, { ...active, isDeleted: true });
+      expect(await createWebRepository(scope).emptyTrash()).toEqual({ ok: true, deleted: 1 });
+      const action = await localDb.syncQueue.get(`action:${scope}:memo.emptyTrash:trash`);
+      expect(action?.payload).toEqual({ memoIds: [trashed.id, active.id] });
+      expect(await localDb.memos.get([scope, active.id])).toBeUndefined();
+    } finally {
+      restoreWindow();
+    }
+  });
+
   test("reconciles stale template cache entries while preserving queued local edits", async () => {
     const previousOnline = globalThis.navigator?.onLine;
     if (globalThis.navigator) Object.defineProperty(globalThis.navigator, "onLine", { configurable: true, value: true });
@@ -416,5 +434,42 @@ describe("web repository offline boundaries", () => {
       restoreWindow();
       if (globalThis.navigator) Object.defineProperty(globalThis.navigator, "onLine", { configurable: true, value: previousOnline });
     }
+  });
+});
+
+describe("guarded plugin saves in the Web repository", () => {
+  test("checks the local snapshot inside the transaction even when the cloud revision has not advanced", async () => {
+    const restoreWindow = installTestWindow();
+    try {
+      const scope = "guarded-plugins";
+      const memo = await createLocalMemo(scope, { notebookId: "nb", contentMarkdown: "Original" });
+      const repository = createWebRepository(scope);
+      const input = text => ({ expectedRevision: memo.revision, expectedContentHash: memo.contentHash, editSessionId: "plugin", title: "", tags: [],
+        contentMarkdown: text, contentJson: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text }] }] } });
+      const result = await Promise.allSettled([
+        repository.updateMemo(memo, input("First"), { guardLocalSnapshot: true }),
+        repository.updateMemo(memo, input("Second"), { guardLocalSnapshot: true }),
+      ]);
+      expect(result.map(item => item.status)).toEqual(["fulfilled", "rejected"]);
+      expect(result[1].reason).toMatchObject({ code: "NOTE_CONFLICT" });
+      expect((await localDb.memos.get([scope, memo.id])).contentMarkdown).toBe("First");
+      expect((await localDb.syncQueue.get(`memo.update:${memo.id}`)).payload.contentMarkdown).toBe("First");
+    } finally { restoreWindow(); }
+  });
+
+  test("preserves conflict contents and queue diagnostics until explicitly resolved", async () => {
+    const restoreWindow = installTestWindow();
+    try {
+      const scope = "guarded-plugins";
+      const memo = await createLocalMemo(scope, { notebookId: "nb", contentMarkdown: "Local conflict" });
+      const conflict = { id: `memo.update:${memo.id}`, memoId: memo.id, scope, kind: "memo.update", status: "conflict", payload: { contentMarkdown: "Local conflict" },
+        attemptCount: 1, lastError: "Remote edit", lastErrorCode: "revision_conflict", claimId: null, createdAt: "2026-01-01", updatedAt: "2026-01-01" };
+      await localDb.syncQueue.put(conflict);
+      await expect(createWebRepository(scope).updateMemo(memo, {
+        expectedRevision: memo.revision, expectedContentHash: memo.contentHash, editSessionId: "plugin", title: "Changed", contentJson: memo.contentJson, tags: [],
+      }, { guardLocalSnapshot: true })).rejects.toMatchObject({ code: "NOTE_CONFLICT" });
+      expect(await localDb.syncQueue.get(conflict.id)).toEqual(conflict);
+      expect((await localDb.memos.get([scope, memo.id])).contentMarkdown).toBe("Local conflict");
+    } finally { restoreWindow(); }
   });
 });

@@ -4,6 +4,9 @@ import {
   ARCHITECTURE_EDGE_LABEL_LINE_HEIGHT,
   ARCHITECTURE_LABEL_FONT,
   architectureEdgePorts,
+  architectureEdgeTerminals,
+  architectureEdgeRouter,
+  architectureTerminalAnchor,
   architectureEdgeVisual,
   architectureNodeVisual,
   resolveArchitectureSurface,
@@ -111,14 +114,14 @@ export const diagramDocumentToX6Cells = (
       ...(architectureVisual ? { markup: architectureVisual.markup } : mindMapRole ? { markup: mindMapTopicMarkup(document.structure, mindMapRole) } : {}),
       attrs: {
         body: {
-          fill,
-          stroke,
-          strokeWidth: mindVisual?.body.strokeWidth ?? flowchartVisual?.body.strokeWidth ?? architectureVisual?.body.strokeWidth ?? 1,
           strokeDasharray: architectureVisual?.body.strokeDasharray ?? (isBoundary ? "7 5" : undefined),
           ...(mindVisual?.body ?? flowchartVisual?.body ?? architectureVisual?.body ?? {
             rx: isTerminator ? 24 : 11,
             ry: isTerminator ? 24 : 11,
           }),
+          fill,
+          stroke,
+          strokeWidth: mindVisual?.body.strokeWidth ?? flowchartVisual?.body.strokeWidth ?? architectureVisual?.body.strokeWidth ?? 1,
           ...(node.shape === "decision" ? { refPoints: "0,10 10,0 20,10 10,20" } : {}),
         },
         label: {
@@ -147,6 +150,10 @@ export const diagramDocumentToX6Cells = (
     };
   });
   const projectedById = new Map(nodes.map((node) => [node.id, node]));
+  const architectureBoundaryIds = document.nodes.filter((node) => node.shape === "boundary").map((node) => node.id);
+  const architectureTerminals = document.kind === "architecture"
+    ? architectureEdgeTerminals(document.nodes.filter((node) => node.shape !== "boundary"), document.edges)
+    : null;
   const edges = document.edges.map((edge) => {
     const edgeKind = edge.kind ?? (document.kind === "architecture" ? "dependency" : undefined);
     const sourceNode = projectedById.get(edge.source);
@@ -183,22 +190,30 @@ export const diagramDocumentToX6Cells = (
           ? flowchartEdgePorts(sourceNode, targetNode)
           : null
       : null;
-    const orthogonalStraight = Boolean(orthogonalPorts && sourceNode && targetNode && flowchartEdgeIsStraight(sourceNode, targetNode));
+    const orthogonalStraight = document.kind === "flowchart"
+      && Boolean(orthogonalPorts && sourceNode && targetNode && flowchartEdgeIsStraight(sourceNode, targetNode));
+    const architectureTerminal = architectureTerminals?.get(edge.id);
     return {
       id: edge.id,
       source: document.kind === "mind-map"
         ? { cell: edge.source, ...(sourceTerminal ?? { anchor: { name: sides.source } }) }
+        : architectureTerminal
+          ? { cell: edge.source, anchor: architectureTerminalAnchor(architectureTerminal.source) }
         : orthogonalPorts
           ? { cell: edge.source, port: orthogonalPorts.source }
           : { cell: edge.source },
       target: document.kind === "mind-map"
         ? { cell: edge.target, ...(targetTerminal ?? { anchor: { name: sides.target } }) }
+        : architectureTerminal
+          ? { cell: edge.target, anchor: architectureTerminalAnchor(architectureTerminal.target) }
         : orthogonalPorts
           ? { cell: edge.target, port: orthogonalPorts.target }
           : { cell: edge.target },
-      router: document.kind === "flowchart" || document.kind === "architecture"
-        ? (orthogonalStraight ? { name: "normal" } : FLOWCHART_EDGE_ROUTER)
-        : undefined,
+      router: document.kind === "architecture"
+        ? architectureEdgeRouter(edge.source, edge.target, architectureBoundaryIds, orthogonalPorts ?? undefined)
+        : document.kind === "flowchart"
+          ? (orthogonalStraight ? { name: "normal" } : FLOWCHART_EDGE_ROUTER)
+          : undefined,
       connector: document.kind === "mind-map"
         ? {
           name: MIND_MAP_CONNECTOR_NAME,
@@ -211,6 +226,7 @@ export const diagramDocumentToX6Cells = (
         }
         : { name: "rounded", args: { radius: 10 } },
       attrs: { line: {
+        ...(mindEdge ? mindMapEdgeLineAttrs(document.structure, stroke) : { fill: "none" }),
         stroke,
         strokeWidth: architectureEdge?.strokeWidth ?? (mindEdge ? mindMapEdgeLineAttrs(document.structure, stroke).strokeWidth : 1.5),
         strokeDasharray: architectureEdge?.strokeDasharray,
@@ -218,7 +234,6 @@ export const diagramDocumentToX6Cells = (
           ? architectureEdge.sourceMarker
           : edge.bidirectional ? { name: "block", width: 7, height: 5 } : null,
         targetMarker: document.kind === "mind-map" ? null : architectureEdge?.targetMarker ?? { name: "block", width: 7, height: 5 },
-        ...(mindEdge ? mindMapEdgeLineAttrs(document.structure, stroke) : { fill: "none" }),
       } },
       labels: edge.label ? [{ attrs: {
         label: {

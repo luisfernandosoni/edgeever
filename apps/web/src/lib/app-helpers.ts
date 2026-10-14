@@ -26,7 +26,8 @@ export type ShortcutAction =
   | "saveAndSync"
   | "toggleReadingProtection"
   | "toggleEditorMode"
-  | "toggleOutline";
+  | "toggleOutline"
+  | "toggleSidebar";
 export type ShortcutBinding = {
   key: string;
   ctrlOrMeta: boolean;
@@ -67,6 +68,14 @@ export const isTextEntryTarget = (target: EventTarget | null) =>
 
 export const getSearchShortcutScope = (selectedMemoId: string | null): "note" | "memo-list" =>
   selectedMemoId ? "note" : "memo-list";
+
+export const getCreateMemoNotebookId = (
+  selectedNotebookId: string | null,
+  notebooks: ReadonlyArray<Pick<Notebook, "id">>,
+  defaultNotebookId: string | null,
+) => selectedNotebookId
+  ? notebooks.some((notebook) => notebook.id === selectedNotebookId) ? selectedNotebookId : null
+  : defaultNotebookId;
 
 export const getNotebookAncestorIds = (nodes: NotebookNode[], targetNotebookId: string) => {
   const walk = (items: NotebookNode[], ancestors: string[]): string[] | null => {
@@ -133,6 +142,7 @@ export { DEFAULT_MEMO_TITLE };
 export const IMAGE_COMPRESSION_STORAGE_KEY = "edgeever.imageCompressionEnabled";
 export const DESKTOP_FOCUS_MODE_STORAGE_KEY = "edgeever.desktopFocusMode";
 export const NOTEBOOK_SIDEBAR_COLLAPSED_STORAGE_KEY = "edgeever.notebookSidebarCollapsed";
+export const NOTEBOOK_SIDEBAR_WIDTH_STORAGE_KEY = "edgeever.notebookSidebarWidth";
 export const DESKTOP_READING_PROTECTION_STORAGE_KEY = "edgeever.desktopReadingProtection";
 export const EDITOR_OUTLINE_COLLAPSED_STORAGE_KEY = "edgeever.editorOutlineCollapsed";
 export const EDITOR_CONTENT_ALIGNMENT_STORAGE_KEY = "edgeever.editorContentAlignment";
@@ -146,7 +156,11 @@ export const NOTEBOOK_TREE_COLLAPSED_IDS_STORAGE_KEY = "edgeever.notebookTreeCol
 export const SHORTCUT_SETTINGS_STORAGE_KEY = "edgeever.shortcutSettings";
 export const DEFAULT_MEMO_LIST_WIDTH_PX = 360;
 export const MIN_MEMO_LIST_WIDTH_PX = 300;
-export const MAX_MEMO_LIST_WIDTH_PX = 540;
+export const MAX_MEMO_LIST_WIDTH_PX = 800;
+export const MIN_EDITOR_WIDTH_PX = 640;
+export const DEFAULT_NOTEBOOK_SIDEBAR_WIDTH_PX = 240;
+export const MIN_NOTEBOOK_SIDEBAR_WIDTH_PX = 180;
+export const MAX_NOTEBOOK_SIDEBAR_WIDTH_PX = 420;
 export const EDITOR_LOCAL_SAVE_DELAY_MS = 1_200;
 
 export const MEMO_DRAG_MIME = "application/x-edgeever-memos";
@@ -190,6 +204,7 @@ export const getShortcutActionOptions = (
   { value: "toggleReadingProtection", label: t("shortcuts.actions.toggleReadingProtection.label") },
   { value: "toggleEditorMode", label: t("shortcuts.actions.toggleEditorMode.label") },
   { value: "toggleOutline", label: t("shortcuts.actions.toggleOutline.label") },
+  { value: "toggleSidebar", label: t("shortcuts.actions.toggleSidebar.label") },
 ];
 
 export const DEFAULT_SHORTCUT_SETTINGS: ShortcutSettings = {
@@ -206,6 +221,7 @@ export const DEFAULT_SHORTCUT_SETTINGS: ShortcutSettings = {
   toggleReadingProtection: { key: "e", ctrlOrMeta: true, shift: false, alt: false },
   toggleEditorMode: { key: "/", ctrlOrMeta: true, shift: false, alt: false },
   toggleOutline: { key: "1", ctrlOrMeta: true, shift: true, alt: false },
+  toggleSidebar: { key: "\\", ctrlOrMeta: true, shift: false, alt: false },
 };
 
 const LEGACY_READING_PROTECTION_SHORTCUT: ShortcutBinding = {
@@ -233,6 +249,7 @@ const SHORTCUT_ACTION_VALUES: ShortcutAction[] = [
   "toggleReadingProtection",
   "toggleEditorMode",
   "toggleOutline",
+  "toggleSidebar",
 ];
 
 export const isDefaultMemoTitle = (title: string | null | undefined) => title?.trim() === DEFAULT_MEMO_TITLE;
@@ -312,6 +329,28 @@ export const readNotebookSidebarCollapsedPreference = () => {
 export const writeNotebookSidebarCollapsedPreference = (collapsed: boolean) => {
   try {
     window.localStorage.setItem(NOTEBOOK_SIDEBAR_COLLAPSED_STORAGE_KEY, collapsed ? "true" : "false");
+  } catch {
+    // Local storage can be unavailable in private or restricted browser contexts.
+  }
+};
+
+export const clampNotebookSidebarWidth = (width: number) =>
+  Math.min(MAX_NOTEBOOK_SIDEBAR_WIDTH_PX, Math.max(MIN_NOTEBOOK_SIDEBAR_WIDTH_PX, Math.round(width)));
+
+export const readNotebookSidebarWidthPreference = () => {
+  try {
+    const storedWidth = window.localStorage.getItem(NOTEBOOK_SIDEBAR_WIDTH_STORAGE_KEY);
+    if (storedWidth === null) return DEFAULT_NOTEBOOK_SIDEBAR_WIDTH_PX;
+    const width = Number(storedWidth);
+    return Number.isFinite(width) ? clampNotebookSidebarWidth(width) : DEFAULT_NOTEBOOK_SIDEBAR_WIDTH_PX;
+  } catch {
+    return DEFAULT_NOTEBOOK_SIDEBAR_WIDTH_PX;
+  }
+};
+
+export const writeNotebookSidebarWidthPreference = (width: number) => {
+  try {
+    window.localStorage.setItem(NOTEBOOK_SIDEBAR_WIDTH_STORAGE_KEY, String(clampNotebookSidebarWidth(width)));
   } catch {
     // Local storage can be unavailable in private or restricted browser contexts.
   }
@@ -436,9 +475,26 @@ export const writeMemoListDensityPreference = (density: MemoListDensity) => {
 export const clampMemoListWidth = (width: number) =>
   Math.min(MAX_MEMO_LIST_WIDTH_PX, Math.max(MIN_MEMO_LIST_WIDTH_PX, Math.round(width)));
 
+export const getMaxMemoListWidthForViewport = (
+  viewportWidth: number,
+  notebookSidebarWidth: number,
+) => Math.min(MAX_MEMO_LIST_WIDTH_PX, Math.max(0, viewportWidth - notebookSidebarWidth - MIN_EDITOR_WIDTH_PX));
+
+/** Reserve the editor and a usable list on compact three-pane desktops.
+ * Keep the saved preferences intact when the window temporarily gets smaller.
+ */
+export const getEditorPaneWidths = (viewportWidth: number, sidebarWidth: number, listWidth: number) => {
+  const sidebar = Math.min(sidebarWidth, Math.max(0, viewportWidth - MIN_EDITOR_WIDTH_PX - 180));
+  const maximum = getMaxMemoListWidthForViewport(viewportWidth, sidebar);
+  const minimum = Math.min(MIN_MEMO_LIST_WIDTH_PX, maximum);
+  return { sidebar, minimum, maximum, list: Math.min(maximum, Math.max(minimum, listWidth)) };
+};
+
 export const readMemoListWidthPreference = () => {
   try {
-    const width = Number(window.localStorage.getItem(MEMO_LIST_WIDTH_STORAGE_KEY));
+    const storedWidth = window.localStorage.getItem(MEMO_LIST_WIDTH_STORAGE_KEY);
+    if (storedWidth === null) return DEFAULT_MEMO_LIST_WIDTH_PX;
+    const width = Number(storedWidth);
     return Number.isFinite(width) ? clampMemoListWidth(width) : DEFAULT_MEMO_LIST_WIDTH_PX;
   } catch {
     return DEFAULT_MEMO_LIST_WIDTH_PX;
@@ -582,6 +638,13 @@ export const shortcutBindingsEqual = (first: ShortcutBinding, second: ShortcutBi
   first.ctrlOrMeta === second.ctrlOrMeta &&
   first.shift === second.shift &&
   first.alt === second.alt;
+
+// The sidebar shortcut only acts when the sidebar can be seen: Focus Mode hides
+// it, so toggling there would change a persisted state without any feedback.
+export const canToggleNotebookSidebar = ({ isDesktop, focusModeActive }: {
+  isDesktop: boolean;
+  focusModeActive: boolean;
+}) => isDesktop && !focusModeActive;
 
 export const getShortcutActionForEvent = (event: KeyboardEvent, settings: ShortcutSettings): ShortcutAction | null => {
   const eventBinding = shortcutBindingFromKeyboardEvent(event);
@@ -853,8 +916,10 @@ export const setMemoDragPreview = (dataTransfer: DataTransfer, label: string) =>
     <svg style="width: 15px; height: 15px; color: var(--brand-green); flex-shrink: 0;" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
       <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"></path>
     </svg>
-    <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600;">${label}</span>
+    <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600;"></span>
   `;
+
+  dragImage.querySelector("span")!.textContent = label;
 
   Object.assign(dragImage.style, {
     position: "fixed",

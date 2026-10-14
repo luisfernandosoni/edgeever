@@ -1,3 +1,5 @@
+import type { PluginNoteKind, PluginContentDocument, PluginDiagramGraph, PluginDiagramEditInput, PluginTableDocument, PluginTableEditInput, PluginPosterDocument, PluginPosterEditInput, PluginInfographicDocument, PluginInfographicEditInput } from "./structured-notes";
+export * from "./structured-notes";
 export const PLUGIN_API_VERSION = "2" as const;
 export const THEME_API_VERSION = "1" as const;
 
@@ -74,6 +76,7 @@ interface PluginSettingBase {
   key: string;
   label: string;
   description?: string;
+  locales?: Record<string, { label?: string; description?: string; placeholder?: string; options?: Record<string, string> }>;
   required?: boolean;
   /** Host-rendered read-only items, opened from a small entry next to the field. */
   list?: PluginSettingList;
@@ -93,7 +96,7 @@ export interface PluginSettingsSchema {
 
 export type PluginSettingValue = string | number | boolean;
 
-export const PLUGIN_API_ERROR_CODES = ["NOTE_CONFLICT", "RESOURCE_CONFLICT", "INVALID_MARKDOWN_EDIT"] as const;
+export const PLUGIN_API_ERROR_CODES = ["NOTE_CONFLICT", "RESOURCE_CONFLICT", "INVALID_MARKDOWN_EDIT", "STRUCTURED_NOTE_REQUIRED", "INVALID_STRUCTURED_EDIT", "NOTE_TYPE_MISMATCH", "TABLE_DATA_CHANGES_REQUIRED", "HOST_UPGRADE_REQUIRED"] as const;
 export type PluginApiErrorCode = (typeof PLUGIN_API_ERROR_CODES)[number];
 export interface PluginApiError extends Error {
   code: PluginApiErrorCode;
@@ -162,15 +165,41 @@ export interface MarketplaceEntry {
       stylesCss?: string;
     };
   };
+  /** SPDX license identifier recorded when a community plugin was admitted. */
+  licenseSpdx?: string;
+  /** 40-character commit recorded for a community plugin release. */
+  sourceRevision?: string;
+  /** Plugin API version this community entry was admitted against. */
+  apiVersion?: string;
+  /** Theme API version this community entry was admitted against. */
+  themeApiVersion?: string;
+  /** Capability snapshot used to detect a later permission expansion. */
+  admitted?: {
+    permissions: string[];
+    networkHosts: string[];
+  };
+  /**
+   * Set only by the client after a signed community registry is merged.
+   * Remote files cannot claim this field.
+   */
+  listing?: "community";
+}
+
+export interface MarketplaceRevocation {
+  id: string;
+  reason: string;
+  revokedAt: string;
 }
 
 export interface MarketplaceRegistry {
   registryVersion: typeof MARKETPLACE_REGISTRY_VERSION;
   updatedAt: string;
   entries: MarketplaceEntry[];
+  revocations?: MarketplaceRevocation[];
 }
 
 export interface PluginNoteSummary {
+  kind: PluginNoteKind;
   id: string;
   notebookId: string;
   title: string | null;
@@ -182,6 +211,8 @@ export interface PluginNoteSummary {
 }
 
 export interface PluginNote extends PluginNoteSummary {
+  /** Full persisted document; read-only through this API. Special payloads also live in contentMarkdown. */
+  contentJson: PluginContentDocument;
   revision: number;
   contentMarkdown: string;
   contentText: string;
@@ -471,6 +502,8 @@ export interface PluginContext {
   ai: {
     status(): Promise<{ configured: boolean; modelName?: string }>;
     generate(input: { system: string; prompt: string; maxOutputTokens?: number; signal?: AbortSignal }): Promise<{ text: string }>;
+    transcribeResource(noteId: string, resourceId: string): Promise<{ text: string; resourceId: string; filename: string }>;
+    transcribeMedia(media: Blob, options?: { signal?: AbortSignal }): Promise<{ text: string }>;
   };
   notes: {
     query(input?: PluginNoteQuery): Promise<PluginNoteQueryResult>;
@@ -487,6 +520,24 @@ export interface PluginContext {
       list(noteId: string): Promise<PluginNoteRevision[]>;
       restore(noteId: string, revisionId: string): Promise<PluginNote>;
     };
+  };
+  diagrams: {
+    get(noteId: string, options?: { includeLayout?: boolean }): Promise<{ note: PluginNote; diagram: PluginDiagramGraph; editToken: string }>;
+    edit(noteId: string, input: PluginDiagramEditInput): Promise<{ note: PluginNote; diagram: PluginDiagramGraph; editToken: string; dryRun: boolean }>;
+  };
+  tables: {
+    get(noteId: string): Promise<{ note: PluginNote; table: PluginTableDocument; editToken: string }>;
+    edit(noteId: string, input: PluginTableEditInput): Promise<{ note: PluginNote; table: PluginTableDocument; editToken: string; dryRun: boolean; changedCellCount: number; removedAttachmentCount: number }>;
+  };
+  posters: {
+    capabilities(): Promise<{ templates: string[]; platforms: Array<{ id: string; width: number; height: number }>; fonts: string[]; editableFields: string[]; limits: { maxElements: number; maxOperations: number; canvasMin: number; canvasMax: number } }>;
+    get(noteId: string): Promise<{ note: PluginNote; poster: PluginPosterDocument; editToken: string }>;
+    edit(noteId: string, input: PluginPosterEditInput): Promise<{ note: PluginNote; poster: PluginPosterDocument; editToken: string; dryRun: boolean; changed: boolean }>;
+  };
+  infographics: {
+    capabilities(): Promise<{ templates: string[]; themes: string[]; maxOperations: number }>;
+    get(noteId: string): Promise<{ note: PluginNote; infographic: PluginInfographicDocument; data: Record<string, PluginJsonValue>; template: string; theme?: string; editToken: string }>;
+    edit(noteId: string, input: PluginInfographicEditInput): Promise<{ note: PluginNote; infographic: PluginInfographicDocument; editToken: string; dryRun: boolean; changed: boolean }>;
   };
   notebooks: {
     list(): Promise<PluginNotebook[]>;
@@ -760,6 +811,43 @@ const normalizeThemeTokens = (value: unknown): ThemeTokens => {
 
 const SETTING_KEY_PATTERN = /^[a-z][a-z0-9._-]*$/;
 
+const normalizeSettingLocales = (value: unknown, key: string, type: string, optionValues: string[]) => {
+  if (value === undefined) return undefined;
+  if (!isRecord(value) || Object.keys(value).length > 50) throw new Error(`Plugin setting ${key} locales must be an object with at most 50 entries.`);
+  const locales: NonNullable<PluginSettingBase["locales"]> = {};
+  for (const [rawLocale, copy] of Object.entries(value)) {
+    let locale: string;
+    try { locale = Intl.getCanonicalLocales(rawLocale.trim().replaceAll("_", "-"))[0] ?? ""; } catch { locale = ""; }
+    if (!locale || Object.keys(locales).some((existing) => existing.toLocaleLowerCase() === locale.toLocaleLowerCase())) {
+      throw new Error(`Plugin setting ${key} has an invalid or duplicate locale: ${rawLocale}.`);
+    }
+    if (!isRecord(copy)) throw new Error(`Plugin setting ${key} locale ${locale} must be an object.`);
+    const localized: NonNullable<PluginSettingBase["locales"]>[string] = {};
+    for (const property of ["label", "description", "placeholder"] as const) {
+      if (copy[property] === undefined) continue;
+      const limit = property === "description" ? 1000 : 200;
+      if (typeof copy[property] !== "string" || !copy[property].trim() || copy[property].length > limit || (property === "placeholder" && type !== "text" && type !== "secret")) {
+        throw new Error(`Plugin setting ${key} locale ${locale} has an invalid ${property}.`);
+      }
+      localized[property] = copy[property].trim();
+    }
+    if (copy.options !== undefined) {
+      if (type !== "select" || !isRecord(copy.options) || Object.keys(copy.options).some((option) => !optionValues.includes(option))) {
+        throw new Error(`Plugin setting ${key} locale ${locale} has invalid options.`);
+      }
+      const translatedOptions: Array<[string, string]> = [];
+      for (const [option, label] of Object.entries(copy.options)) {
+        if (typeof label !== "string" || !label.trim() || label.length > 200) throw new Error(`Plugin setting ${key} locale ${locale} has an invalid option label.`);
+        translatedOptions.push([option, label.trim()]);
+      }
+      localized.options = Object.fromEntries(translatedOptions);
+    }
+    if (Object.keys(localized).length === 0) throw new Error(`Plugin setting ${key} locale ${locale} must include translated copy.`);
+    locales[locale] = localized;
+  }
+  return locales;
+};
+
 const normalizeSettingList = (field: Record<string, unknown>, key: string): PluginSettingList | undefined => {
   if (field.list === undefined) return undefined;
   if (!isRecord(field.list) || !Array.isArray(field.list.items) || field.list.items.length === 0 || field.list.items.length > 100) {
@@ -803,9 +891,13 @@ const normalizePluginSettings = (value: unknown): PluginSettingsSchema => {
     if (typeof field.label !== "string" || !field.label.trim() || field.label.length > 200) throw new Error(`Plugin setting ${field.key} requires a label of at most 200 characters.`);
     if (typeof field.description === "string" && field.description.length > 1000) throw new Error(`Plugin setting ${field.key} description is too long.`);
     const list = normalizeSettingList(field, field.key);
+    const optionValues = field.type === "select" && Array.isArray(field.options)
+      ? field.options.filter(isRecord).map((option) => String(option.value)) : [];
+    const locales = normalizeSettingLocales(field.locales, field.key, String(field.type), optionValues);
     const common = {
       key: field.key,
       label: field.label.trim(),
+      ...(locales ? { locales } : {}),
       ...(typeof field.description === "string" && field.description.trim() ? { description: field.description.trim() } : {}),
       ...(field.required === true ? { required: true } : {}),
       ...(list ? { list } : {}),
@@ -921,6 +1013,67 @@ const normalizeChecksum = (value: unknown, label: string) => {
   return value.toLocaleLowerCase();
 };
 const GITHUB_REPOSITORY_PATTERN = /^https:\/\/github\.com\/[^/]+\/[^/]+\/?$/i;
+const SPDX_PATTERN = /^[A-Za-z0-9][A-Za-z0-9.+-]{0,63}$/;
+const COMMIT_SHA_PATTERN = /^[0-9a-f]{40}$/;
+const API_VERSION_PATTERN = /^\d+(?:\.\d+){0,3}$/;
+const NETWORK_HOST_PATTERN = /^(?:\*\.)?[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/i;
+
+export const isReservedMarketplacePluginId = (id: string) =>
+  id === "org.edgeever" || id.startsWith("org.edgeever.");
+
+const readOptionalToken = (
+  value: unknown,
+  pattern: RegExp,
+  label: string,
+  normalize?: (value: string) => string,
+) => {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || !pattern.test(value)) throw new Error(label);
+  return normalize ? normalize(value) : value;
+};
+
+const readAdmittedSnapshot = (value: unknown, id: string): MarketplaceEntry["admitted"] => {
+  if (value === undefined) return undefined;
+  if (!isRecord(value) || !Array.isArray(value.permissions) || !Array.isArray(value.networkHosts)) {
+    throw new Error(`Marketplace entry ${id} has an invalid admission snapshot.`);
+  }
+  const allowedPermissions = new Set<string>(PLUGIN_PERMISSIONS);
+  const permissions = [...new Set(value.permissions.map(String))];
+  const unsupported = permissions.find((permission) => !allowedPermissions.has(permission));
+  if (unsupported) throw new Error(`Marketplace entry ${id} has an unsupported admitted permission.`);
+  const networkHosts = [...new Set(value.networkHosts.map(String))];
+  if (networkHosts.some((host) => !NETWORK_HOST_PATTERN.test(host))) {
+    throw new Error(`Marketplace entry ${id} has an invalid admitted network host.`);
+  }
+  return { permissions, networkHosts };
+};
+
+const readRevocations = (value: unknown): MarketplaceRevocation[] | undefined => {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) throw new Error("Marketplace revocations must be an array.");
+  const ids = new Set<string>();
+  return value.map((item) => {
+    if (!isRecord(item) || typeof item.id !== "string" || !ID_PATTERN.test(item.id)) {
+      throw new Error("Marketplace revocation id is invalid.");
+    }
+    if (ids.has(item.id)) throw new Error(`Duplicate marketplace revocation id: ${item.id}`);
+    ids.add(item.id);
+    if (typeof item.reason !== "string" || !item.reason.trim() || item.reason.trim().length > 500) {
+      throw new Error(`Marketplace revocation ${item.id} is missing a reason.`);
+    }
+    if (typeof item.revokedAt !== "string" || Number.isNaN(Date.parse(item.revokedAt))) {
+      throw new Error(`Marketplace revocation ${item.id} has an invalid revokedAt.`);
+    }
+    return { id: item.id, reason: item.reason.trim(), revokedAt: item.revokedAt };
+  });
+};
+
+const isInstallableCommunityEntry = (entry: MarketplaceEntry) => {
+  if (entry.apiVersion && entry.themeApiVersion) return false;
+  if (entry.apiVersion) return entry.apiVersion === PLUGIN_API_VERSION;
+  if (entry.themeApiVersion) return entry.themeApiVersion === THEME_API_VERSION;
+  return false;
+};
 
 export const parseMarketplaceRegistry = (value: unknown): MarketplaceRegistry => {
   if (!isRecord(value) || value.registryVersion !== MARKETPLACE_REGISTRY_VERSION || !Array.isArray(value.entries)) {
@@ -969,6 +1122,16 @@ export const parseMarketplaceRegistry = (value: unknown): MarketplaceRegistry =>
           })) as MarketplaceEntry["verification"]["checksums"]
         : (() => { throw new Error(`Marketplace entry ${item.id} checksums must be an object.`); })();
     if (!checksums?.manifestJson) throw new Error(`Marketplace entry ${item.id} must pin the manifest.json checksum.`);
+    const licenseSpdx = readOptionalToken(item.licenseSpdx, SPDX_PATTERN, `Marketplace entry ${item.id} has an invalid SPDX license.`);
+    const sourceRevision = readOptionalToken(
+      item.sourceRevision,
+      COMMIT_SHA_PATTERN,
+      `Marketplace entry ${item.id} has an invalid source revision.`,
+      (revision) => revision.toLocaleLowerCase(),
+    );
+    const apiVersion = readOptionalToken(item.apiVersion, API_VERSION_PATTERN, `Marketplace entry ${item.id} has an invalid apiVersion.`);
+    const themeApiVersion = readOptionalToken(item.themeApiVersion, API_VERSION_PATTERN, `Marketplace entry ${item.id} has an invalid themeApiVersion.`);
+    const admitted = readAdmittedSnapshot(item.admitted, item.id);
     return {
       id: item.id,
       name: name.trim(),
@@ -980,7 +1143,60 @@ export const parseMarketplaceRegistry = (value: unknown): MarketplaceRegistry =>
       repositoryUrl: repositoryUrl.trim(),
       distribution,
       verification: { version: item.verification.version, checksums },
+      ...(licenseSpdx ? { licenseSpdx } : {}),
+      ...(sourceRevision ? { sourceRevision } : {}),
+      ...(apiVersion ? { apiVersion } : {}),
+      ...(themeApiVersion ? { themeApiVersion } : {}),
+      ...(admitted ? { admitted } : {}),
     };
   });
-  return { registryVersion: MARKETPLACE_REGISTRY_VERSION, updatedAt: value.updatedAt, entries };
+  const revocations = readRevocations(value.revocations);
+  return {
+    registryVersion: MARKETPLACE_REGISTRY_VERSION,
+    updatedAt: value.updatedAt,
+    entries,
+    ...(revocations ? { revocations } : {}),
+  };
+};
+
+/**
+ * Overlay a signed community registry onto the bundled official list.
+ * Official entries, their repository URLs, and `publisher: "edgeever"` stay
+ * on the bundled list. A signature does not make a remote entry official.
+ */
+export const mergeCommunityMarketplace = (
+  bundled: MarketplaceRegistry,
+  community: MarketplaceRegistry | null,
+  revokedIds: ReadonlySet<string>,
+): MarketplaceRegistry => {
+  const bundledIds = new Set(bundled.entries.map((entry) => entry.id));
+  const entries = bundled.entries.filter((entry) => !revokedIds.has(entry.id));
+  for (const entry of community?.entries ?? []) {
+    if (entry.publisher) continue;
+    if (isReservedMarketplacePluginId(entry.id) || bundledIds.has(entry.id) || revokedIds.has(entry.id)) continue;
+    if (entry.distribution.type !== "github" || !isInstallableCommunityEntry(entry)) continue;
+    const { publisher, listing, ...rest } = entry;
+    void publisher;
+    void listing;
+    entries.push({ ...rest, listing: "community" });
+  }
+  return {
+    registryVersion: bundled.registryVersion,
+    updatedAt: bundled.updatedAt,
+    entries,
+    ...(bundled.revocations ? { revocations: bundled.revocations } : {}),
+  };
+};
+
+/** Revocation ids only grow. A later record may replace the reason, never remove the id. */
+export const rememberMarketplaceRevocations = (
+  existing: readonly MarketplaceRevocation[],
+  incoming: readonly MarketplaceRevocation[],
+): MarketplaceRevocation[] => {
+  const byId = new Map(existing.map((item) => [item.id, item]));
+  for (const item of incoming) {
+    const current = byId.get(item.id);
+    if (!current || Date.parse(item.revokedAt) >= Date.parse(current.revokedAt)) byId.set(item.id, item);
+  }
+  return [...byId.values()].sort((left, right) => left.id.localeCompare(right.id));
 };

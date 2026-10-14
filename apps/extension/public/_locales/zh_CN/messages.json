@@ -3,7 +3,7 @@
     "message": "EdgeEver 网页剪藏"
   },
   "extensionDescription": {
-    "message": "将当前网页、选中内容，或右键图片保存到你自托管的 EdgeEver 实例。"
+    "message": "将网页、选中文字、图片及 Hacker News 主帖保存到你自托管的 EdgeEver 实例。"
   },
   "actionTitle": {
     "message": "保存到 EdgeEver"
@@ -11,8 +11,8 @@
   "webClipper": {
     "message": "网页剪藏"
   },
-  "popupDescription": {
-    "message": "剪藏当前网页或选中内容。选中文字后右键可以保存这段文字；在图片上右键可以保存图片；在 X 上右键可以保存这条推文。"
+  "platformZhihu": {
+    "message": "知乎"
   },
   "saveCurrentPage": {
     "message": "剪藏当前网页"
@@ -99,7 +99,7 @@
     "message": "默认笔记本"
   },
   "autoFirstNotebook": {
-    "message": "连接后自动使用第一个笔记本"
+    "message": "等待分类"
   },
   "testConnection": {
     "message": "测试连接"
@@ -203,10 +203,10 @@
     "message": "（网页没有可提取的正文内容）"
   },
   "saveSelectionToEdgeEver": {
-    "message": "保存选中文字到 EdgeEver"
+    "message": "保存所选内容到 EdgeEver"
   },
   "selectionSaveHint": {
-    "message": "选中网页上的一段文字后右键，选择“保存选中文字到 EdgeEver”。这段文字会存成一条新笔记，放进上面选择的默认笔记本。"
+    "message": "选中网页上的一段文字后右键，选择“保存所选内容到 EdgeEver”。这段文字会存成一条新笔记，放进上面选择的默认笔记本。"
   },
   "savingSelection": {
     "message": "正在保存选中文字……"
@@ -280,10 +280,10 @@
     "message": "这次保存已经结束。请在图片上重新右键。"
   },
   "saveTweetToEdgeEver": {
-    "message": "保存这条推文到 EdgeEver"
+    "message": "保存推文到 EdgeEver"
   },
   "tweetSaveHint": {
-    "message": "在 X 上右键一条推文，选择“保存这条推文到 EdgeEver”。正文会完整保存，包括被「显示更多」折叠的部分；已经显示的图片也会放进同一条新笔记，笔记本与上面的默认笔记本相同。"
+    "message": "在 X 上右键一条推文，选择“保存推文到 EdgeEver”。正文会完整保存，包括被「显示更多」折叠的部分；已经显示的图片也会放进同一条新笔记，笔记本与上面的默认笔记本相同。"
   },
   "savingTweet": {
     "message": "正在保存这条推文……"
@@ -316,9 +316,396 @@
     "message": "一条推文"
   },
   "tweetSaveWindowTitle": {
-    "message": "保存这条推文到 EdgeEver"
+    "message": "保存推文到 EdgeEver"
   },
   "tweetTimeLabel": {
     "message": "时间"
+  },
+  "saveGithubRepoToEdgeEver": {
+    "message": "保存仓库信息到 EdgeEver"
+  },
+  "githubRepoSaveHint": {
+    "message": "在 GitHub 仓库主页或代码目录上，右键页面空白、简介或 README 正文，选择“保存仓库信息到 EdgeEver”。仓库地址和简介会存成一条新笔记，放进上面选择的默认笔记本。Issue、讨论和单个文件页不会保存。"
+  },
+  "savingGithubRepo": {
+    "message": "正在保存这个仓库……"
+  },
+  "githubRepoSaved": {
+    "message": "已把这个仓库存成一条笔记。"
+  },
+  "githubRepoNotPage": {
+    "message": "当前不是 GitHub 仓库主页或代码目录，没有保存。"
+  },
+  "githubRepoUnreadable": {
+    "message": "没有读到这个仓库的信息，没有保存。"
+  },
+  "githubRepoHomepageLabel": {
+    "message": "主页"
+  },
+  "githubRepoLanguageLabel": {
+    "message": "语言"
+  },
+  "githubRepoLicenseLabel": {
+    "message": "许可证"
+  },
+  "githubRepoTopicsLabel": {
+    "message": "话题"
+  },
+  "saveXhsToEdgeEver": {
+    "message": "保存笔记到 EdgeEver"
+  },
+  "xhsSaveHint": {
+    "message": "在小红书笔记正文上右键，选择“保存笔记到 EdgeEver”。标题、正文和笔记里的图片会存成一条新笔记，评论不会写入。右键图片仍然只保存这张图片。"
+  },
+  "savingXhs": {
+    "message": "正在保存这篇笔记……"
+  },
+  "xhsSaved": {
+    "message": "已把这篇笔记存成一条笔记。"
+  },
+  "xhsNotFound": {
+    "message": "没有定位到这篇笔记。请先打开笔记，再在正文上右键。"
+  },
+  "xhsNeedsOpen": {
+    "message": "请先打开这篇笔记，再在正文上右键。"
+  },
+  "xhsPermissionIntro": {
+    "message": "首页上有很多篇笔记。允许访问小红书之后，插件才能记住指针下的这一篇。允许后，请再在同一篇笔记上右键一次。只会把你选中的这篇存进剪藏插件的默认笔记本。"
+  },
+  "xhsPermissionToast": {
+    "message": "需要允许访问小红书，才能在首页上选中这篇笔记。允许后请再右键一次。"
+  },
+  "xhsRightClickAgain": {
+    "message": "已经可以识别首页上的笔记。请再在这篇笔记上右键一次。"
+  },
+  "allowXhsAccess": {
+    "message": "允许访问小红书"
+  },
+  "xhsPermissionDenied": {
+    "message": "没有获得访问权限。请再在笔记上右键一次来重新授权。"
+  },
+  "xhsPermissionReady": {
+    "message": "已允许。回到页面，再在这篇笔记上右键一次。"
+  },
+  "xhsNoteFallbackTitle": {
+    "message": "一篇小红书笔记"
+  },
+  "xhsSaveWindowTitle": {
+    "message": "保存笔记到 EdgeEver"
+  },
+  "xhsLocationLabel": {
+    "message": "地点"
+  },
+  "saveZhihuToEdgeEver": {
+    "message": "保存回答/文章到 EdgeEver"
+  },
+  "zhihuQuestionLabel": {
+    "message": "问题"
+  },
+  "zhihuArticleLabel": {
+    "message": "文章"
+  },
+  "zhihuAuthorLabel": {
+    "message": "作者："
+  },
+  "zhihuAnswerLabel": {
+    "message": "回答"
+  },
+  "zhihuArticleBodyLabel": {
+    "message": "正文"
+  },
+  "zhihuSaveHint": {
+    "message": "在知乎回答或文章的正文上右键，选择“保存回答/文章到 EdgeEver”。标题、作者、正文和图片会存成一条新笔记，评论不会写入。右键图片仍然只保存这张图片。"
+  },
+  "savingZhihu": {
+    "message": "正在保存这篇知乎内容……"
+  },
+  "zhihuSaved": {
+    "message": "已把这篇知乎内容存成一条笔记。"
+  },
+  "zhihuNotFound": {
+    "message": "没有定位到这篇回答或文章。请在正文上右键。"
+  },
+  "zhihuUnreadable": {
+    "message": "没有读到这篇回答或文章的正文，没有保存。"
+  },
+  "zhihuPermissionIntro": {
+    "message": "页面上有多篇回答或文章。允许访问知乎之后，插件才能记住指针下的这一篇。允许后，请再在同一篇正文上右键一次。只会把你选中的这一篇存进剪藏插件的默认笔记本。"
+  },
+  "zhihuPermissionToast": {
+    "message": "需要允许访问知乎，才能在列表里选中这一篇。允许后请再右键一次。"
+  },
+  "zhihuRightClickAgain": {
+    "message": "已经可以识别页面上的回答和文章。请再在正文上右键一次。"
+  },
+  "allowZhihuAccess": {
+    "message": "允许访问知乎"
+  },
+  "zhihuPermissionDenied": {
+    "message": "没有获得访问权限。请再在正文上右键一次来重新授权。"
+  },
+  "zhihuPermissionReady": {
+    "message": "已允许。回到页面，再在这篇正文上右键一次。"
+  },
+  "zhihuNoteFallbackTitle": {
+    "message": "一篇知乎内容"
+  },
+  "zhihuSaveWindowTitle": {
+    "message": "保存回答/文章到 EdgeEver"
+  },
+  "saveRedditToEdgeEver": {
+    "message": "保存 Reddit 帖子到 EdgeEver"
+  },
+  "savingReddit": {
+    "message": "正在保存这条 Reddit 帖子……"
+  },
+  "redditSaved": {
+    "message": "已把这条 Reddit 帖子存成笔记。"
+  },
+  "redditNotFound": {
+    "message": "没有定位到这条 Reddit 帖子。请直接在帖子上右键。"
+  },
+  "redditRightClickAgain": {
+    "message": "现在可以识别 Reddit 帖子了。请在同一条帖子上再次右键。"
+  },
+  "redditAuthorLabel": {
+    "message": "作者"
+  },
+  "redditCommunityLabel": {
+    "message": "社区"
+  },
+  "redditLinkLabel": {
+    "message": "外部链接"
+  },
+  "saveVideoNoteToEdgeEver": {
+    "message": "保存视频笔记到 EdgeEver"
+  },
+  "savingVideoNote": {
+    "message": "正在保存视频笔记……"
+  },
+  "videoNoteSaved": {
+    "message": "已保存视频笔记"
+  },
+  "videoTranscriptSaved": {
+    "message": "已保存字幕，总结未生成"
+  },
+  "videoTranscriptNeedScope": {
+    "message": "已保存字幕，总结未生成。请在设置中为 Token 加上 ai:generate，并配置默认模型。"
+  },
+  "videoTranscriptNeedModel": {
+    "message": "已保存字幕，总结未生成。请先配置默认模型。"
+  },
+  "videoTranscriptTooLong": {
+    "message": "已保存字幕。这篇太长，没有生成总结。"
+  },
+  "videoInfoSaved": {
+    "message": "已保存视频信息"
+  },
+  "videoPageUnsupported": {
+    "message": "暂不支持这个页面"
+  },
+  "videoNotRead": {
+    "message": "没有读到这个视频"
+  },
+  "videoSourceLabel": {
+    "message": "来源"
+  },
+  "videoPlatformLabel": {
+    "message": "平台"
+  },
+  "videoCaptionsLabel": {
+    "message": "字幕"
+  },
+  "videoCapturedAtLabel": {
+    "message": "保存时间"
+  },
+  "videoSummaryHeading": {
+    "message": "核心总结"
+  },
+  "videoOutlineHeading": {
+    "message": "分段大纲"
+  },
+  "videoTakeawaysHeading": {
+    "message": "要点"
+  },
+  "videoTranscriptHeading": {
+    "message": "字幕实录"
+  },
+  "videoCoverAlt": {
+    "message": "封面"
+  },
+  "videoPlatformYouTube": {
+    "message": "YouTube"
+  },
+  "videoPlatformBilibili": {
+    "message": "哔哩哔哩"
+  },
+  "videoCaptionsAuto": {
+    "message": "平台自动字幕"
+  },
+  "videoCaptionsCreator": {
+    "message": "创作者字幕"
+  },
+  "videoNoCaptions": {
+    "message": "这一集没有可用字幕"
+  },
+  "videoNoteFallbackTitle": {
+    "message": "视频笔记"
+  },
+  "saveHackerNewsToEdgeEver": {
+    "message": "保存 Hacker News 主帖到 EdgeEver"
+  },
+  "saveV2exToEdgeEver": {
+    "message": "保存 V2EX 主题到 EdgeEver"
+  },
+  "saveXiaoyuzhouToEdgeEver": {
+    "message": "保存小宇宙单集到 EdgeEver"
+  },
+  "savingPlatformClip": {
+    "message": "正在保存当前内容到 EdgeEver…"
+  },
+  "platformNotDetail": {
+    "message": "请打开支持的主帖、主题或单集详情页后重试。"
+  },
+  "platformUnreadable": {
+    "message": "无法读取目标内容。请按需登录，等待详情页加载完成后重试。"
+  },
+  "platformPageChanged": {
+    "message": "剪藏时页面内容已切换，尚未保存。请在目标详情页重试。"
+  },
+  "platformIncomplete": {
+    "message": "未能读取完整内容，尚未保存。请展开全文并等待图片加载后重试。"
+  },
+  "platformImagesPartial": {
+    "message": "正文已保存，部分图片仍为外链。"
+  },
+  "platformSavedWithImages": {
+    "message": "已保存到 EdgeEver，图片已全部归档。"
+  },
+  "platformNoShowNotes": {
+    "message": "本期无 Show Notes。"
+  },
+  "platformAuthorLabel": {
+    "message": "作者"
+  },
+  "platformPublishedAtLabel": {
+    "message": "发布时间"
+  },
+  "platformRelativeTimeLabel": {
+    "message": "页面原文，相对时间"
+  },
+  "platformScoreLabel": {
+    "message": "采集时积分"
+  },
+  "platformExternalLinkLabel": {
+    "message": "原始外链"
+  },
+  "platformSupplementLabel": {
+    "message": "附言"
+  },
+  "platformPodcastLabel": {
+    "message": "节目"
+  },
+  "saveFacebookToEdgeEver": {
+    "message": "保存 Facebook 帖子到 EdgeEver"
+  },
+  "saveInstagramToEdgeEver": {
+    "message": "保存 Instagram 帖子到 EdgeEver"
+  },
+  "saveLinkedinToEdgeEver": {
+    "message": "保存 LinkedIn 动态到 EdgeEver"
+  },
+  "saveThreadsToEdgeEver": {
+    "message": "保存 Threads 帖子到 EdgeEver"
+  },
+  "saveBlueskyToEdgeEver": {
+    "message": "保存 Bluesky 帖子到 EdgeEver"
+  },
+  "socialSelectPost": {
+    "message": "请打开帖子详情页，或在目标帖子上再次右键保存。"
+  },
+  "checkingPageCapture": {
+    "message": "识别中"
+  },
+  "pageCaptureAdapted": {
+    "message": "已适配"
+  },
+  "pageCaptureGeneric": {
+    "message": "通用采集"
+  },
+  "pageCaptureSelectPost": {
+    "message": "选帖或文字"
+  },
+  "pageCaptureUnavailable": {
+    "message": "不可剪藏"
+  },
+  "pageCaptureUnknown": {
+    "message": "未识别"
+  },
+  "platformXiaoyuzhou": {
+    "message": "小宇宙"
+  },
+  "saveSubstackNoteToEdgeEver": {
+    "message": "保存 Substack 短帖到 EdgeEver"
+  },
+  "adaptedPlatformsTitle": {
+    "message": "深度适配平台"
+  },
+  "platformXiaohongshu": {
+    "message": "小红书"
+  },
+  "platformBilibili": {
+    "message": "哔哩哔哩"
+  },
+  "platformPosts": {
+    "message": "帖子"
+  },
+  "platformNotes": {
+    "message": "笔记与图集"
+  },
+  "platformAnswersArticles": {
+    "message": "回答与文章"
+  },
+  "platformRepositories": {
+    "message": "仓库信息"
+  },
+  "platformCaptionsImages": {
+    "message": "配文与图集"
+  },
+  "platformMainPosts": {
+    "message": "主帖"
+  },
+  "platformTopics": {
+    "message": "主题与补充"
+  },
+  "platformShowNotes": {
+    "message": "单集 Show Notes"
+  },
+  "platformArticles": {
+    "message": "文章"
+  },
+  "platformArticlesNotes": {
+    "message": "文章与 Notes"
+  },
+  "platformVideoCaptions": {
+    "message": "视频字幕"
+  },
+  "viewDiagnostics": {
+    "message": "查看诊断信息"
+  },
+  "socialPlatformsTitle": {
+    "message": "社交动态"
+  },
+  "readingPlatformsTitle": {
+    "message": "文章与社区"
+  },
+  "mediaPlatformsTitle": {
+    "message": "视频与播客"
+  },
+  "closeNotification": {
+    "message": "关闭提示"
+  },
+  "clipNotifications": {
+    "message": "剪藏提示"
   }
 }

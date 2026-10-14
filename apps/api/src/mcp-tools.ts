@@ -1,4 +1,5 @@
-import { ARCHITECTURE_RESOURCE_ICONS, TABLE_FIELD_TYPES } from "@edgeever/shared";
+import { posterPatchInputSchema, posterOperationsInputSchema } from "./mcp-poster-schema";
+import { ARCHITECTURE_RESOURCE_ICONS, INFOGRAPHIC_NOTE_TEMPLATES, POSTER_FORMATS, POSTER_TEMPLATES, TABLE_FIELD_TYPES } from "@edgeever/shared";
 
 const DIAGRAM_IR_NODE_TYPES = [
   "topic",
@@ -67,6 +68,82 @@ const tableFieldSchema = {
   },
 };
 
+const infographicLabel = {
+  type: "object",
+  additionalProperties: false,
+  required: ["label"],
+  properties: {
+    label: { type: "string", minLength: 1, maxLength: 160 },
+    desc: { type: "string", maxLength: 240 },
+  },
+};
+
+const infographicChild = {
+  type: "object",
+  additionalProperties: false,
+  required: ["label"],
+  properties: {
+    label: { type: "string", minLength: 1, maxLength: 160 },
+    desc: { type: "string", maxLength: 240 },
+    children: { type: "array", maxItems: 8, items: infographicLabel },
+  },
+};
+
+const infographicDataSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["title"],
+  properties: {
+    title: { type: "string", minLength: 1, maxLength: 160 },
+    desc: { type: "string", maxLength: 240 },
+    values: {
+      type: "array",
+      maxItems: 12,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["label", "value"],
+        properties: {
+          label: { type: "string", minLength: 1, maxLength: 80 },
+          value: { type: "number" },
+        },
+      },
+    },
+    compares: { type: "array", maxItems: 4, items: infographicChild },
+    sequences: { type: "array", maxItems: 12, items: infographicLabel },
+    lists: { type: "array", maxItems: 12, items: infographicLabel },
+    root: infographicChild,
+    nodes: {
+      type: "array",
+      maxItems: 12,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["id", "label"],
+        properties: {
+          id: { type: "string", minLength: 1, maxLength: 40 },
+          label: { type: "string", minLength: 1, maxLength: 80 },
+          desc: { type: "string", maxLength: 240 },
+        },
+      },
+    },
+    relations: {
+      type: "array",
+      maxItems: 24,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["from", "to"],
+        properties: {
+          from: { type: "string", minLength: 1, maxLength: 40 },
+          to: { type: "string", minLength: 1, maxLength: 40 },
+          direction: { type: "string", maxLength: 20 },
+        },
+      },
+    },
+  },
+};
+
 const MCP_TOOL_DEFINITIONS = [
   {
     name: "get_current_user",
@@ -80,7 +157,7 @@ const MCP_TOOL_DEFINITIONS = [
   },
   {
     name: "search_memos",
-    description: "Search active EdgeEver memos by text, tag, notebook, time range, pin state, or resource presence. query is optional. For recently created or added notes, pass createdAfter and omit query; do not put this week/最近/新增 in query. Time bounds accept YYYY-MM-DD or ISO date-time.",
+    description: "Search active EdgeEver memos by text, tag, notebook, time range, pin state, resource presence, or poster type. Use poster=true to find editable poster notes (海报笔记); do not search for the word 海报 to identify the type. query is optional. For recently created or added notes, pass createdAfter and omit query; do not put this week/最近/新增 in query. Time bounds accept YYYY-MM-DD or ISO date-time.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -94,13 +171,14 @@ const MCP_TOOL_DEFINITIONS = [
         updatedBefore: { type: "string", description: "ISO 8601 date (YYYY-MM-DD) or date-time. Date-only means 23:59:59.999Z." },
         isPinned: { type: "boolean" },
         hasResources: { type: "boolean" },
+        poster: { type: "boolean", description: "true: only editable posters; false: exclude posters; omitted: all types." },
         limit: { type: "integer", minimum: 1, maximum: 50 },
       },
     },
   },
   {
     name: "list_memos",
-    description: "List EdgeEver memos with pagination. Use includeContent when full Markdown is needed.",
+    description: "List EdgeEver memos with pagination. Use poster=true to list only editable poster notes (海报笔记), false to exclude them. Use includeContent when full Markdown is needed.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -110,6 +188,7 @@ const MCP_TOOL_DEFINITIONS = [
         offset: { type: "integer", minimum: 0 },
         includeContent: { type: "boolean" },
         includeDeleted: { type: "boolean" },
+        poster: { type: "boolean", description: "Filter by editable poster type before pagination." },
       },
     },
   },
@@ -128,7 +207,7 @@ const MCP_TOOL_DEFINITIONS = [
   },
   {
     name: "create_memo",
-    description: "Create a memo in a notebook.",
+    description: "Create a prose Markdown memo in a notebook. For an editable poster/海报笔记, use create_poster_memo instead; never substitute poster-style prose.",
     inputSchema: {
       type: "object",
       required: ["notebookId"],
@@ -235,9 +314,26 @@ const MCP_TOOL_DEFINITIONS = [
     },
   },
   {
+    name: "create_infographic_memo",
+    description:
+      "Create an AntV infographic note (信息图). Use this for 信息图, infographic, 占比, 构成, 饼图, 柱状图, 折线图, 对比, 四象限, 时间线, and a process infographic. Do not use create_diagram_memo, create_memo, or a mind map. Use chart-pie-donut-plain-text with data.values for a share or 占比; chart-column-simple for columns; chart-line-plain-text for a trend; compare-binary-horizontal-badge-card-vs for two subjects with matched children; compare-quadrant-quarter-simple-card for four quadrants; sequence-timeline-rounded-rect-node for a timeline; sequence-steps-simple for steps; list-grid-simple for a parallel list; hierarchy-tree-tech-style-capsule-item for a tree; relation-network-simple-circle-node for a network. Fill only the data array that matches the template. data.title is the note title. If the user did not supply the figures, say in data.desc that the values are illustrative and are not an official disclosure. 思维导图, 流程图, and 架构图 still use create_diagram_memo.",
+    inputSchema: {
+      type: "object",
+      required: ["notebookId", "template", "data"],
+      additionalProperties: false,
+      properties: {
+        notebookId: { type: "string", minLength: 1 },
+        title: { type: "string", maxLength: 160 },
+        template: { type: "string", enum: [...INFOGRAPHIC_NOTE_TEMPLATES] },
+        data: infographicDataSchema,
+        tags: { type: "array", maxItems: 100, items: { type: "string" } },
+      },
+    },
+  },
+  {
     name: "create_diagram_memo",
     description:
-      "Create an editable visual diagram memo from a semantic graph; EdgeEver generates node sizes, coordinates, edge IDs, and a deterministic layout. For mind maps, omit node type and use parentId for hierarchy. Flowchart node types are process, decision, start, or end. Architecture node types are client, frontend, service, database, storage, queue, security, external, or boundary; boundary nodes may contain nodes through parentId but cannot be edge endpoints.",
+      "Create an editable visual diagram memo from a semantic graph; EdgeEver generates node sizes, coordinates, edge IDs, and a deterministic layout. Mind maps and flowcharts always start with the default plain theme; any supplied theme is ignored for those kinds. For mind maps, omit node type and use parentId for hierarchy. Flowchart node types are process, decision, start, or end. Architecture node types are client, frontend, service, database, storage, queue, security, external, or boundary; boundary nodes contain components through those components' parentId and cannot be edge endpoints. Give every architecture boundary at least one contained component, or omit the boundary rather than creating an empty section.",
     inputSchema: {
       type: "object",
       required: ["notebookId", "kind", "nodes"],
@@ -246,7 +342,7 @@ const MCP_TOOL_DEFINITIONS = [
         notebookId: { type: "string", minLength: 1 },
         title: { type: "string", maxLength: 160 },
         kind: { type: "string", enum: ["mind-map", "flowchart", "architecture"] },
-        theme: { type: "string", enum: ["plain", "brand", "sun", "wa", "island", "rose", "mint", "cosmos", "tea", "naive", "macaron", "ocean", "ink", "classic", "paper"] },
+        theme: { type: "string", description: "Color scheme for architecture diagrams. Mind maps and flowcharts always start with the default plain theme.", enum: ["plain", "brand", "sun", "wa", "island", "rose", "mint", "cosmos", "tea", "naive", "macaron", "ocean", "ink", "classic", "paper"] },
         structure: { type: "string", enum: ["map", "line", "capsule", "box", "circle", "ellipse", "hexagon", "logic", "tree", "brace", "org", "timeline", "fishbone"] },
         layout: {
           type: "object",
@@ -267,6 +363,78 @@ const MCP_TOOL_DEFINITIONS = [
           maxItems: 400,
           items: diagramEdgeSchema,
         },
+      },
+    },
+  },
+  {
+    name: "create_poster_memo",
+    description: "Create an editable poster note (海报笔记). Use this when asked to generate a poster, not create_memo or update_memo with poster-style prose. First plan the takeaway and content hierarchy. For explanatory topics (industry layouts, knowledge summaries, comparisons or guides), supply 3–6 concise sections with heading/body and choose layout=grid for categories or layout=list for steps. Do not reduce an informative topic to a title and generic subtitle. Use supplied note content when referenced; do not invent statistics, sources or brand relationships. For quotes, slogans or an explicitly minimal cover, omit sections. Choose template deliberately (bold/minimal for technology or business, editorial/quote for literary copy); optional badge/footer require sections. EdgeEver compiles editable elements and fits text to the selected format. Do not inspect other notes or local files to reverse-engineer the poster format. If this tool fails, report the error; never silently substitute an ordinary Markdown note. Use get_poster then update_poster only for subsequent edits.",
+    inputSchema: {
+      type: "object", required: ["notebookId", "title", "heading"], additionalProperties: false,
+      properties: {
+        notebookId: { type: "string", minLength: 1 }, title: { type: "string", minLength: 1, maxLength: 160 },
+        heading: { type: "string", minLength: 1, maxLength: 80 }, subtitle: { type: "string", maxLength: 240 },
+        layout: { type: "string", enum: ["auto", "grid", "list"], description: "With sections: grid for categories/comparisons, list for ordered steps; auto adapts to canvas aspect ratio." },
+        badge: { type: "string", maxLength: 24, description: "Optional short topic label; requires sections." },
+        footer: { type: "string", maxLength: 100, description: "Optional takeaway or supplied source; requires sections. Never invent attribution." },
+        sections: { type: "array", minItems: 2, maxItems: 6, description: "Main content for informative posters. Each section must convey a distinct useful point, not repeat the subtitle.", items: { type: "object", additionalProperties: false, required: ["heading", "body"], properties: { heading: { type: "string", minLength: 1, maxLength: 32 }, body: { type: "string", minLength: 1, maxLength: 120 } } } },
+        template: { type: "string", enum: [...POSTER_TEMPLATES] },
+        format: { type: "string", enum: POSTER_FORMATS.map(format => format.id) },
+        tags: { type: "array", maxItems: 100, items: { type: "string" } },
+      },
+    },
+  },
+  {
+    name: "request_poster_render",
+    description: "Queue a fresh PNG preview on an online desktop/Web client. Read get_poster and pass expectedRevision. Optional templateId applies a full browser design template, preserving additional decorations; use only for an explicit template change. Requires write:memos and write:resources. Returns a job, not an image. No online client means pending; query get_poster_render_job and only claim rendered after completed, then get_poster_preview. Pending expires after 10 minutes; rendering after 2 minutes. Do not busy-poll.",
+    inputSchema: { type: "object", required: ["memoId", "expectedRevision"], additionalProperties: false, properties: { memoId: { type: "string", minLength: 1 }, expectedRevision: { type: "integer", minimum: 0 }, templateId: { type: "string", description: "ID from browserDesignTemplates in get_poster_capabilities" } } },
+  },
+  {
+    name: "get_poster_render_job",
+    description: "Read client render status: pending, rendering, completed or failed. Completion provides resultRevision; read get_poster_preview for the current image. A pending task needs an online desktop/Web workspace. Poll at intervals of at least 5 seconds, never loop rapidly or claim success early.",
+    inputSchema: { type: "object", required: ["jobId"], additionalProperties: false, properties: { jobId: { type: "string", minLength: 1 } } },
+  },
+  {
+    name: "get_poster_capabilities",
+    description: "Discover supported poster templates, fonts, platform dimensions, limits, detailed editing fields, operations and rendering/export availability. Read before designing or guessing parameter values.",
+    inputSchema: { type: "object", additionalProperties: false, properties: {} },
+  },
+  {
+    name: "get_poster_preview",
+    description: "Read the current saved rendered preview of a poster. Returns available=false when it has not been rendered after edits. Never treat source data or an old preview as current. For a fresh image call request_poster_render; an online desktop/Web workspace renders it.",
+    inputSchema: { type: "object", required: ["memoId"], additionalProperties: false, properties: { memoId: { type: "string", minLength: 1 } } },
+  },
+  {
+    name: "export_poster",
+    description: "Export a poster's editable JSON source or its current saved preview image. This does not render a new image; saved_preview fails clearly when no current browser-rendered preview exists. Return the source as a .json file, not as a raster image. Image URLs require normal authenticated resource access.",
+    inputSchema: { type: "object", required: ["memoId", "format"], additionalProperties: false, properties: { memoId: { type: "string", minLength: 1 }, format: { type: "string", enum: ["source", "saved_preview"] } } },
+  },
+  {
+    name: "get_poster",
+    description: "Read an editable poster's canvas, element IDs, text, colors and geometry. Read before update_poster; never decode or replace poster Markdown.",
+    inputSchema: { type: "object", required: ["memoId"], additionalProperties: false, properties: { memoId: { type: "string", minLength: 1 } } },
+  },
+  {
+    name: "update_poster",
+    description: "Edit an existing poster: typography, image crop, shapes, strokes, shadows, visibility, elements, layers, groups, canvas and platform sizes. Read get_poster_capabilities for supported fields and operation arguments. Edits run first, operations next in order, resize last. Use operations lock=false in a separate call before editing locked elements. apply_template replaces all elements and is only for an explicit template change. Image resource IDs must belong to this poster. Preserve unmentioned elements and locked elements. Read get_poster first and pass its expectedRevision. Use dryRun to validate without saving. Changes invalidate the saved preview; call request_poster_render to have an online desktop/Web client render a fresh one.",
+    inputSchema: {
+      type: "object", required: ["memoId", "expectedRevision"], additionalProperties: false,
+      properties: {
+        memoId: { type: "string", minLength: 1 }, expectedRevision: { type: "integer", minimum: 0 }, dryRun: { type: "boolean" },
+        background: { type: "string", pattern: "^#[0-9a-fA-F]{6}$" },
+        backgroundGradient: { type: ["object", "null"], additionalProperties: false, required: ["kind", "from", "to"], properties: {
+          kind: { type: "string", enum: ["linear", "radial"] }, from: { type: "string", pattern: "^#[0-9a-fA-F]{6}$" }, to: { type: "string", pattern: "^#[0-9a-fA-F]{6}$" }, angle: { type: "number", minimum: -360, maximum: 360 },
+        } },
+        canvas: { type: "object", required: ["width", "height"], additionalProperties: false, properties: {
+          width: { type: "integer", minimum: 320, maximum: 4096 }, height: { type: "integer", minimum: 320, maximum: 4096 }, scaleElements: { type: "boolean" },
+        } },
+        platform: { type: "string", description: "Platform ID from get_poster_capabilities. Resizes the canvas and scales elements. Do not combine with canvas." },
+        operations: posterOperationsInputSchema,
+        edits: { type: "array", maxItems: 100, items: {
+          type: "object", required: ["id", "patch"], additionalProperties: false,
+          properties: { id: { type: "string", minLength: 1 }, patch: posterPatchInputSchema,
+          },
+        } },
       },
     },
   },
@@ -380,7 +548,7 @@ const MCP_TOOL_DEFINITIONS = [
   },
   {
     name: "update_memo",
-    description: "Update memo title, Markdown, tags, notebook, or pinned state.",
+    description: "Update memo title, Markdown, tags, notebook, or pinned state. To generate an editable poster/海报笔记, call create_poster_memo; to edit one, use get_poster then update_poster. Never manually encode poster source or replace a poster request with ordinary prose.",
     inputSchema: {
       type: "object",
       required: ["memoId"],
@@ -400,7 +568,7 @@ const MCP_TOOL_DEFINITIONS = [
   },
   {
     name: "trash_memos",
-    description: "Move one or more active memos to trash. Use dryRun to preview affected memos.",
+    description: "Move one or more active memos, including editable posters, to trash. This is recoverable through restore_memos. Find the exact IDs with search_memos or list_memos (poster=true for posters); never guess IDs. Use dryRun to preview affected memos.",
     inputSchema: {
       type: "object",
       required: ["memoIds"],
@@ -601,6 +769,19 @@ const MCP_TOOL_DEFINITIONS = [
         notebookId: { type: "string" },
         parentId: { type: ["string", "null"] },
         sortOrder: { type: "integer" },
+      },
+    },
+  },
+  {
+    name: "delete_notebook",
+    description: "Soft-delete a notebook and all its empty descendants. Refuses deletion if any active note exists in the subtree; never deletes notes. The default inbox is protected. Resolve paths with resolve_notebook_path first and use the exact notebookId. Use dryRun to preview affected notebook IDs without changes. Concurrent changes require a fresh preview and retry.",
+    inputSchema: {
+      type: "object",
+      required: ["notebookId"],
+      additionalProperties: false,
+      properties: {
+        notebookId: { type: "string", minLength: 1, description: "Exact EdgeEver notebook ID obtained from a unique path resolution or lookup." },
+        dryRun: { type: "boolean", description: "Preview the empty subtree without deleting it." },
       },
     },
   },
@@ -873,6 +1054,11 @@ const READ_ONLY_MCP_TOOLS = new Set([
   "get_memo",
   "get_table_records",
   "get_diagram",
+  "get_poster",
+  "get_poster_capabilities",
+  "get_poster_render_job",
+  "get_poster_preview",
+  "export_poster",
   "list_memo_resources",
   "list_resources",
   "list_memo_revisions",
@@ -891,6 +1077,8 @@ const NON_DESTRUCTIVE_MCP_TOOLS = new Set([
   "create_memo",
   "create_table_memo",
   "create_diagram_memo",
+  "create_infographic_memo",
+  "create_poster_memo",
   "import_memos",
   "restore_memos",
   "move_memos",
@@ -908,6 +1096,7 @@ const NON_DESTRUCTIVE_MCP_TOOLS = new Set([
   "restore_default_ai_instructions",
 ]);
 const IDEMPOTENT_MCP_TOOLS = new Set([
+  "delete_notebook",
   "restore_memos",
   "move_memos",
   "add_tags_to_memos",

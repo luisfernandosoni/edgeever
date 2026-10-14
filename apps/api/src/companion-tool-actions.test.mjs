@@ -5,13 +5,13 @@ import { Hono } from "hono";
 import { createSelfHostedStorageAdapter } from "./self-hosted-storage-adapter.ts";
 import { registerCompanionRoutes } from "./companion-routes.ts";
 import { beginCompanionTurn, checkpointCompanionTurn, clearCompanionHistory, saveCompanionMemory } from "./companion-service.ts";
-import { parseDiagramDocument } from "@edgeever/shared";
+import { createPosterDocument, serializePosterDocument, parsePosterDocument, createDefaultTableDocument, parseDiagramDocument, parseInfographicDocument, parseTableDocument, serializeTableDocument } from "@edgeever/shared";
 import { createMemoRecord, getMemoDetail, normalizeSearchTimeBound, updateMemoRecord } from "./memo-service.ts";
 import { companionWorkspaceCursor, proposeCompanionToolAction } from "./companion-tool-actions.ts";
 import { getCompanionAction, applyCompanionAction, dismissCompanionAction } from "./companion-actions.ts";
 import { COMPANION_MCP_TOOLS, validateCompanionTool } from "./companion-tool-catalog.ts";
 import { MCP_TOOLS } from "./mcp-tools.ts";
-import { companionToolDefinitions, createCompanionTools, explicitDiagramKind } from "./companion-agent-tools.ts";
+import { companionToolDefinitions, createCompanionTools, explicitDiagramKind, requestsInfographic, resolveWorkspaceInboxId } from "./companion-agent-tools.ts";
 import { companionExecutionReceipts } from "./companion-runtime.ts";
 
 const databases = [];
@@ -48,8 +48,67 @@ async function setup() {
 }
 
 describe("shared companion MCP adapter", () => {
+  test("finds, previews and deletes an empty notebook subtree through the companion", async () => {
+    const f = await setup();
+    f.sqlite.query("INSERT INTO notebooks(id, workspace_id, parent_id, name) VALUES ('child', ?, 'target', 'Empty child')").run(scope.workspaceId);
+    const tools = createCompanionTools({ ...f, scope, signal: new AbortController().signal, assertActive: async () => {}, sources: [] });
+    expect(companionToolDefinitions(f.input).find(tool => tool.name === "delete_notebook")).toBeTruthy();
+    const found = await tools.find_notebooks.execute({ name: "target", exact: true });
+    expect(found.notebooks).toHaveLength(1);
+    const args = { notebookId: found.notebooks[0].id };
+    expect(await tools.delete_notebook.execute({ ...args, dryRun: true })).toMatchObject({ dryRun: true, deleted: false, notebookCount: 2 });
+    expect(f.sqlite.query("SELECT is_deleted FROM notebooks WHERE id = 'target'").get().is_deleted).toBe(0);
+    const result = await tools.delete_notebook.execute(args);
+    expect(result).toMatchObject({ applied: true, deleted: true, dryRun: false, notebookCount: 2 });
+    expect(result.notebookIds.sort()).toEqual(["child", "target"]);
+    expect((await tools.find_notebooks.execute({ name: "target", exact: true })).notebooks).toEqual([]);
+    expect(await tools.delete_notebook.execute(args)).toMatchObject({ applied: true, deleted: true, notebookCount: 0 });
+    expect(f.sqlite.query("SELECT COUNT(*) AS n FROM audit_events WHERE action = 'notebook.delete'").get().n).toBe(1);
+    expect(f.sqlite.query("SELECT COUNT(*) AS n FROM companion_actions").get().n).toBe(0);
+    expect((await getMemoDetail(f.db, scope.workspaceId, f.notes[0].id)).contentMarkdown).toBe("One original content");
+  });
+
+  test("companion notebook deletion preserves nonempty subtrees and protects the inbox", async () => {
+    const f = await setup();
+    f.sqlite.query("UPDATE notebooks SET parent_id = 'target' WHERE id = 'ideas'").run();
+    f.sqlite.query("INSERT INTO notebooks(id, workspace_id, name, slug) VALUES (?, ?, 'Inbox', 'inbox')").run(`${scope.workspaceId}_inbox`, scope.workspaceId);
+    const tools = createCompanionTools({ ...f, scope, signal: new AbortController().signal, assertActive: async () => {}, sources: [] });
+    for (const dryRun of [true, false]) {
+      await expect(tools.delete_notebook.execute({ notebookId: "target", dryRun })).rejects.toMatchObject({ code: "notebook_not_empty" });
+    }
+    const inboxTools = createCompanionTools({ ...f, scope, signal: new AbortController().signal, assertActive: async () => {}, sources: [] });
+    await expect(inboxTools.delete_notebook.execute({ notebookId: `${scope.workspaceId}_inbox` })).rejects.toMatchObject({ code: "bad_request" });
+    expect(f.sqlite.query("SELECT COUNT(*) AS n FROM notebooks WHERE is_deleted = 1").get().n).toBe(0);
+    expect(f.sqlite.query("SELECT COUNT(*) AS n FROM audit_events WHERE action = 'notebook.delete'").get().n).toBe(0);
+    expect((await getMemoDetail(f.db, scope.workspaceId, f.notes[0].id)).isDeleted).toBe(false);
+  });
+
+  test("poster CRUD reuses scoped queries, guarded edits, recoverable trash and restoration", async () => {
+    const f = await setup();
+    const tools = createCompanionTools({ ...f, scope, signal: new AbortController().signal, assertActive: async () => {}, sources: [] });
+    const created = await tools.create_poster_memo.execute({ notebookId: "ideas", title: "Energy poster", heading: "Protect your energy", layout: "list", sections: [{ heading: "Rest", body: "Make time to recharge" }, { heading: "Focus", body: "Keep space for important work" }]  });
+    const listed = await tools.list_memos.execute({ poster: true });
+    expect(listed.memos.map(memo => memo.id)).toContain(created.id);
+    expect(listed.memos.find(memo => memo.id === created.id).poster).toBe(true);
+    expect(await tools.get_memo.execute({ memoId: created.id })).toMatchObject({ poster: true, message: expect.stringContaining("get_poster") });
+    await tools.get_poster.execute({ memoId: created.id });
+    const poster = await getMemoDetail(f.db, scope.workspaceId, created.id);
+    expect(parsePosterDocument(poster.contentMarkdown).elements.find(element => element.id === "section-1-body").text).toBe("Make time to recharge");
+    const heading = parsePosterDocument(poster.contentMarkdown).elements.find(element => element.role === "title");
+    await tools.update_poster.execute({ memoId: created.id, expectedRevision: poster.revision, edits: [{ id: heading.id, patch: { text: "Focus on what matters" } }] });
+    expect(parsePosterDocument((await getMemoDetail(f.db, scope.workspaceId, created.id)).contentMarkdown).copy.title).toBe("Focus on what matters");
+    await tools.trash_memos.execute({ memoIds: [created.id], dryRun: true });
+    expect(await getMemoDetail(f.db, scope.workspaceId, created.id)).not.toBeNull();
+    await tools.trash_memos.execute({ memoIds: [created.id] });
+    expect(await getMemoDetail(f.db, scope.workspaceId, created.id)).toBeNull();
+    expect((await tools.search_memos.execute({ poster: true })).memos.map(memo => memo.id)).not.toContain(created.id);
+    const trashed = await tools.list_memos.execute({ poster: true, includeDeleted: true });
+    expect(trashed.memos.map(memo => memo.id)).toContain(created.id);
+    await tools.restore_memos.execute({ memoIds: [created.id] });
+    expect(parsePosterDocument((await getMemoDetail(f.db, scope.workspaceId, created.id)).contentMarkdown).copy.title).toBe("Focus on what matters");
+  });
   test("reuses the exact reviewed MCP definitions, with no administration or upload tools", () => {
-    expect(COMPANION_MCP_TOOLS).toHaveLength(43);
+    expect(COMPANION_MCP_TOOLS).toHaveLength(56);
     for (const definition of COMPANION_MCP_TOOLS) expect(MCP_TOOLS.includes(definition)).toBe(true);
     for (const name of ["upload_memo_image", "upload_memo_attachment", "empty_trash", "share_memo"]) {
       expect(() => validateCompanionTool(name, {})).toThrow();
@@ -115,12 +174,25 @@ describe("shared companion MCP adapter", () => {
   test("read and dry-run tools reuse MCP without writing or requiring a proposal", async () => {
     const f = await setup();
     const tools = createCompanionTools({ ...f, scope, signal: new AbortController().signal, assertActive: async () => {}, sources: [] });
-    expect(Object.keys(tools)).toHaveLength(45);
+    expect(Object.keys(tools)).toHaveLength(58);
     expect(await tools.get_memo.execute({ memoId: f.notes[0].id })).toMatchObject({ content: "One original content" });
     expect(await tools.trash_memos.execute({ memoIds: [f.notes[0].id], dryRun: true })).toMatchObject({ dryRun: true });
     expect(await getMemoDetail(f.db, scope.workspaceId, f.notes[0].id)).not.toBeNull();
     expect(f.sqlite.query("SELECT COUNT(*) AS n FROM companion_actions").get().n).toBe(0);
     expect(createCompanionTools({ ...f, scope, input: { ...f.input, allowNotes: false } })).toEqual({});
+  });
+  test("poster changes use the shared agent execution path with read and revision guards", async () => {
+    const f = await setup();
+    const created = await createMemoRecord(f.db, scope.workspaceId, { notebookId: "ideas", title: "Poster", contentMarkdown: serializePosterDocument(createPosterDocument("Hello")), tags: [] }, actor, "owner");
+    const tools = createCompanionTools({ ...f, scope, signal: new AbortController().signal, assertActive: async () => {}, sources: [] });
+    await expect(tools.update_poster.execute({ memoId: created.id, expectedRevision: created.revision, background: "#16A06E" })).rejects.toMatchObject({ code: "companion_action_unread" });
+    await tools.get_memo.execute({ memoId: created.id });
+    const read = await tools.get_poster.execute({ memoId: created.id });
+    expect(read.poster.elements.length).toBeGreaterThan(0);
+    const updated = await tools.update_poster.execute({ memoId: created.id, expectedRevision: read.memo.revision, background: "#16A06E" });
+    expect(updated).toMatchObject({ applied: true, id: created.id });
+    expect(parsePosterDocument((await getMemoDetail(f.db, scope.workspaceId, created.id)).contentMarkdown).background).toBe("#16A06E");
+    expect(f.sqlite.query("SELECT COUNT(*) AS n FROM companion_actions").get().n).toBe(0);
   });
   test("read-only note access keeps MCP reads and omits write tools", async () => {
     const f = await setup();
@@ -134,7 +206,11 @@ describe("shared companion MCP adapter", () => {
     expect(tools.create_diagram_memo).toBeUndefined();
     expect(tools.update_diagram).toBeUndefined();
     expect(tools.get_diagram).toBeTruthy();
+    expect(tools.get_poster).toBeTruthy();
+    expect(tools.update_poster).toBeUndefined();
     expect(tools.update_memo).toBeUndefined();
+    expect(tools.delete_notebook).toBeUndefined();
+    expect(companionToolDefinitions({ ...f.input, allowWrites: false }).some(tool => tool.name === "delete_notebook")).toBe(false);
     expect(tools.merge_memos).toBeUndefined();
     expect(tools.list_note_templates).toBeTruthy();
     expect(tools.get_ai_instruction).toBeTruthy();
@@ -158,21 +234,24 @@ describe("shared companion MCP adapter", () => {
     expect(await tools.update_memo.execute({ memoId: f.notes[1].id, title: "Title only" })).toMatchObject({ applied: true });
     expect(await getMemoDetail(f.db, scope.workspaceId, f.notes[1].id)).toMatchObject({ title: "Title only", contentMarkdown: "Two original content" });
     await tools.get_memo.execute({ memoId: f.notes[0].id });
-    const proposed = await tools.update_memo.execute({ memoId: f.notes[0].id, title: "Changed", contentMarkdown: "Exact replacement" });
-    const proposalId = proposed.proposalId;
-    expect(proposed).toMatchObject({ status: "awaiting_user_confirmation", proposalId: expect.any(String) });
-    expect(await getMemoDetail(f.db, scope.workspaceId, f.notes[0].id)).toMatchObject({ title: "One", contentMarkdown: "One original content" });
-    expect((await getCompanionAction(f.db, scope, proposalId))?.preview?.baseContentMarkdown).toBe("One original content");
-    const fresh = await getMemoDetail(f.db, scope.workspaceId, f.notes[1].id);
-    const conflictId = await f.propose("update_memo", { memoId: f.notes[1].id, contentMarkdown: "Should not land" }, new Map([[f.notes[1].id, fresh.revision]]));
-    f.sqlite.query("UPDATE memo_contents SET revision = revision + 1 WHERE memo_id = ?").run(f.notes[1].id);
-    await f.complete();
-    expect((await f.request(`actions/${proposalId}/apply`)).status).toBe(200);
+    const updated = await tools.update_memo.execute({ memoId: f.notes[0].id, title: "Changed", contentMarkdown: "Exact replacement" });
+    expect(updated).toMatchObject({ applied: true, id: f.notes[0].id, title: "Changed" });
+    expect(updated).not.toHaveProperty("proposalId");
     expect(await getMemoDetail(f.db, scope.workspaceId, f.notes[0].id)).toMatchObject({ title: "Changed", contentMarkdown: "Exact replacement" });
-    const conflict = await f.request(`actions/${conflictId}/apply`);
-    expect(conflict.status).toBe(409);
-    expect(await conflict.json()).toMatchObject({ error: { code: "companion_action_conflict" } });
-    expect(await getMemoDetail(f.db, scope.workspaceId, f.notes[1].id)).toMatchObject({ title: "Title only", contentMarkdown: "Two original content" });
+    expect(f.sqlite.query("SELECT COUNT(*) AS n FROM companion_actions").get().n).toBe(0);
+    expect(await tools.update_memo.execute({ memoId: f.notes[0].id, contentMarkdown: "Second replacement" }))
+      .toMatchObject({ applied: true, id: f.notes[0].id });
+    expect((await getMemoDetail(f.db, scope.workspaceId, f.notes[0].id)).contentMarkdown).toBe("Second replacement");
+  });
+  test("an auto-applied body edit does not overwrite a note changed after its read", async () => {
+    const f = await setup();
+    const tools = createCompanionTools({ ...f, scope, signal: new AbortController().signal, assertActive: async () => {}, sources: [] });
+    await tools.get_memo.execute({ memoId: f.notes[0].id });
+    await updateMemoRecord(f.db, scope.workspaceId, f.notes[0].id, { contentMarkdown: "Newer edit" }, actor, "owner");
+    expect(await tools.update_memo.execute({ memoId: f.notes[0].id, contentMarkdown: "Stale replacement" }))
+      .toMatchObject({ error: expect.any(String) });
+    expect((await getMemoDetail(f.db, scope.workspaceId, f.notes[0].id)).contentMarkdown).toBe("Newer edit");
+    expect(f.sqlite.query("SELECT COUNT(*) AS n FROM companion_actions").get().n).toBe(0);
   });
   test("move, tag, and notebook writes execute immediately without a confirmation card", async () => {
     const f = await setup();
@@ -195,6 +274,7 @@ describe("shared companion MCP adapter", () => {
       notebookId: "ideas",
       title: "RAG 原理思维导图",
       kind: "mind-map",
+      theme: "mint",
       nodes: [
         { id: "root", label: "RAG" },
         { id: "retrieve", label: "检索", parentId: "root" },
@@ -205,7 +285,7 @@ describe("shared companion MCP adapter", () => {
     expect(created.id).toBeTruthy();
     expect(JSON.stringify(created)).not.toContain("edgeever-diagram-v1");
     const memo = await getMemoDetail(f.db, scope.workspaceId, created.id);
-    expect(parseDiagramDocument(memo.contentMarkdown)).toMatchObject({ kind: "mind-map" });
+    expect(parseDiagramDocument(memo.contentMarkdown)).toMatchObject({ kind: "mind-map", theme: "plain" });
     expect(memo.contentMarkdown).not.toContain("## RAG");
     expect(sources.map(source => source.id)).toContain(created.id);
     const diagramMemo = await tools.get_memo.execute({ memoId: created.id });
@@ -238,6 +318,61 @@ describe("shared companion MCP adapter", () => {
     expect(parseDiagramDocument((await getMemoDetail(f.db, scope.workspaceId, created.id)).contentMarkdown).nodes.map(node => node.id))
       .toContain("eval");
     expect(f.sqlite.query("SELECT COUNT(*) AS n FROM companion_actions").get().n).toBe(0);
+  });
+  test("creates a structured table in the inbox and adds a record using real field IDs", async () => {
+    const f = await setup();
+    const inboxId = `${scope.workspaceId}_inbox`;
+    f.sqlite.query("INSERT INTO notebooks(id, workspace_id, name, slug) VALUES (?, ?, '等待分类', 'inbox')").run(inboxId, scope.workspaceId);
+    const input = { ...f.input, message: "帮我生成一个自媒体选题库的多维表格" };
+    const definition = companionToolDefinitions(input).find(tool => tool.name === "create_table_memo");
+    expect(definition).toBeTruthy();
+    expect(definition.inputSchema.required).not.toContain("notebookId");
+    expect(definition.description).toContain("editable structured table");
+    const sources = [];
+    const tools = createCompanionTools({ ...f, input, scope, signal: new AbortController().signal, assertActive: async () => {}, sources });
+    const created = await tools.create_table_memo.execute({
+      title: "自媒体选题库",
+      fields: [
+        { name: "选题标题", type: "text" },
+        { name: "平台", type: "select", options: ["小红书", "抖音", "公众号"] },
+        { name: "计划发布时间", type: "date" },
+      ],
+    });
+    expect(created).toMatchObject({ applied: true, title: "自媒体选题库", notebookId: inboxId, fieldCount: 3 });
+    expect(created).not.toHaveProperty("memo");
+    expect(sources.map(source => source.id)).toContain(created.id);
+    const memo = await getMemoDetail(f.db, scope.workspaceId, created.id);
+    expect(parseTableDocument(memo.contentMarkdown)).toMatchObject({ records: [], fields: [
+      { name: "选题标题", type: "text" },
+      { name: "平台", type: "select", options: ["小红书", "抖音", "公众号"] },
+      { name: "计划发布时间", type: "date" },
+    ] });
+    const table = await tools.get_table_records.execute({ memoId: created.id });
+    expect(table).toMatchObject({ memoId: created.id, totalRecords: 0 });
+    const cells = Object.fromEntries(table.fields.slice(0, 2).map((field, index) => [field.id, ["秋季选题", "小红书"][index]]));
+    const added = await tools.add_table_record.execute({ memoId: created.id, expectedRevision: table.revision, cells });
+    expect(added).toMatchObject({ applied: true });
+    expect((await tools.get_table_records.execute({ memoId: created.id })).totalRecords).toBe(1);
+    expect(parseTableDocument((await getMemoDetail(f.db, scope.workspaceId, created.id)).contentMarkdown).records).toHaveLength(1);
+    expect(f.sqlite.query("SELECT COUNT(*) AS n FROM companion_actions").get().n).toBe(0);
+  });
+  test("refuses to replace a structured table with update_memo", async () => {
+    const f = await setup();
+    const table = await createMemoRecord(f.db, scope.workspaceId, {
+      notebookId: "ideas",
+      title: "Tasks",
+      contentMarkdown: serializeTableDocument(createDefaultTableDocument()),
+    }, actor, "owner");
+    const tools = createCompanionTools({ ...f, scope, signal: new AbortController().signal, assertActive: async () => {}, sources: [] });
+    const read = await tools.get_memo.execute({ memoId: table.id });
+    expect(read.message).toContain("structured table");
+    expect(read.structuredTable).toBeTruthy();
+    expect(read.content).toContain("|");
+    expect(read.content).not.toContain("edgeever-table-v1");
+    await expect(tools.update_memo.execute({ memoId: table.id, contentMarkdown: "# no" })).rejects.toThrow(
+      "This is a structured table. Do not replace it with update_memo.",
+    );
+    expect((await getMemoDetail(f.db, scope.workspaceId, table.id)).contentMarkdown).toContain("edgeever-table-v1");
   });
   test("create_diagram_memo keeps generated edge IDs out of Agent input", async () => {
     const f = await setup();
@@ -272,7 +407,16 @@ describe("shared companion MCP adapter", () => {
     const agentInput = { ...f.input, message: "帮我生成一个架构图笔记作为说明。" };
     const definition = companionToolDefinitions(agentInput).find(tool => tool.name === "create_diagram_memo");
     expect(definition.inputSchema.properties.kind.enum).toEqual(["architecture"]);
+    expect(definition.inputSchema.required ?? []).not.toContain("notebookId");
     expect(definition.description).toContain("use exactly that kind");
+    expect(definition.description).toContain("等待分类");
+    const plain = companionToolDefinitions(f.input);
+    for (const name of ["create_memo", "create_diagram_memo", "create_infographic_memo", "create_poster_memo", "use_note_template"]) {
+      const tool = plain.find(item => item.name === name);
+      expect(tool.inputSchema.required ?? []).not.toContain("notebookId");
+      expect(tool.description).toContain("等待分类");
+    }
+    expect(plain.find(item => item.name === "ask_user_question").description).toContain("Do not use this to choose a notebook");
 
     const tools = createCompanionTools({ ...f, input: agentInput, scope, signal: new AbortController().signal,
       assertActive: async () => {}, sources: [] });
@@ -286,6 +430,118 @@ describe("shared companion MCP adapter", () => {
     expect(f.sqlite.query("SELECT COUNT(*) AS n FROM memos WHERE title = ?").get(graph.title).n).toBe(0);
     expect(await tools.create_diagram_memo.execute({ ...graph, kind: "architecture" }))
       .toMatchObject({ applied: true, diagramKind: "architecture" });
+  });
+  test("a new note or diagram without a named notebook is saved in the inbox", async () => {
+    const f = await setup();
+    const inboxId = `${scope.workspaceId}_inbox`;
+    f.sqlite.query("INSERT INTO notebooks(id, workspace_id, name, slug) VALUES (?, ?, '等待分类', 'inbox')").run(inboxId, scope.workspaceId);
+    const tools = createCompanionTools({ ...f, scope, signal: new AbortController().signal, assertActive: async () => {}, sources: [] });
+    const note = await tools.create_memo.execute({ title: "Inbox note", contentMarkdown: "Saved without asking" });
+    expect(note.memo.notebookId).toBe(inboxId);
+    const poster = await tools.create_poster_memo.execute({ title: "精力管理", heading: "精力管理大于时间管理", subtitle: "把精力留给重要的事" });
+    expect(poster).toMatchObject({ applied: true, notebookId: inboxId, poster: true });
+    const savedPoster = await getMemoDetail(f.db, scope.workspaceId, poster.id);
+    expect(parsePosterDocument(savedPoster.contentMarkdown).copy.title).toBe("精力管理大于时间管理");
+    const diagram = await tools.create_diagram_memo.execute({
+      title: "模型蒸馏",
+      kind: "flowchart",
+      nodes: [
+        { id: "teacher", label: "教师模型", type: "process" },
+        { id: "student", label: "学生模型", type: "process" },
+      ],
+      edges: [{ source: "teacher", target: "student" }],
+    });
+    expect(diagram).toMatchObject({ applied: true, notebookId: inboxId, diagramKind: "flowchart" });
+    const named = await tools.create_memo.execute({ notebookId: "ideas", title: "Named", contentMarkdown: "Stay put" });
+    expect(named.memo.notebookId).toBe("ideas");
+    expect(await resolveWorkspaceInboxId(f.db, scope.workspaceId)).toBe(inboxId);
+  });
+  test("an infographic request creates a pie infographic instead of a mind map", async () => {
+    const message = "给我生成一个腾讯营收占比的信息图。";
+    expect(requestsInfographic(message)).toBe(true);
+    expect(explicitDiagramKind(message)).toBeUndefined();
+    const f = await setup();
+    const inboxId = `${scope.workspaceId}_inbox`;
+    f.sqlite.query("INSERT INTO notebooks(id, workspace_id, name, slug) VALUES (?, ?, '等待分类', 'inbox')").run(inboxId, scope.workspaceId);
+    const agentInput = { ...f.input, message };
+    const definitions = companionToolDefinitions(agentInput);
+    expect(definitions.find(tool => tool.name === "create_diagram_memo").description).toContain("create_infographic_memo");
+    expect(definitions.find(tool => tool.name === "create_infographic_memo").description).toContain("chart-pie-donut-plain-text");
+    const tools = createCompanionTools({ ...f, input: agentInput, scope, signal: new AbortController().signal, assertActive: async () => {}, sources: [] });
+    await expect(tools.create_diagram_memo.execute({
+      title: "腾讯 2025 年营收占比信息图",
+      kind: "mind-map",
+      nodes: [{ id: "root", label: "营收" }, { id: "ads", label: "网络广告 16%", parentId: "root" }],
+    })).rejects.toMatchObject({ code: "invalid_params", message: expect.stringContaining("create_infographic_memo") });
+    expect(f.sqlite.query("SELECT COUNT(*) AS n FROM memos WHERE title LIKE '%营收%'").get().n).toBe(0);
+    const created = await tools.create_infographic_memo.execute({
+      data: {
+        title: "腾讯 2025 年营收占比",
+        desc: "图中比例为演示用估算，不代表腾讯官方披露数据。",
+        values: [
+          { label: "增值服务", value: 52 },
+          { label: "金融科技与企业服务", value: 30 },
+          { label: "网络广告", value: 16 },
+          { label: "其他业务", value: 2 },
+        ],
+      },
+      template: "chart-pie-donut-plain-text",
+    });
+    expect(created).toMatchObject({
+      applied: true,
+      notebookId: inboxId,
+      template: "chart-pie-donut-plain-text",
+      title: "腾讯 2025 年营收占比",
+      infographic: true,
+    });
+    expect(JSON.stringify(created)).not.toContain("edgeever-infographic-v1");
+    const stored = await getMemoDetail(f.db, scope.workspaceId, created.id);
+    const infographic = parseInfographicDocument(stored.contentMarkdown);
+    expect(infographic.syntax).toContain("infographic chart-pie-donut-plain-text");
+    expect(infographic.syntax).toContain("label 增值服务");
+    expect(infographic.syntax).not.toContain("parentId");
+    const read = await tools.get_memo.execute({ memoId: created.id });
+    expect(read.infographic).toMatchObject({ template: "chart-pie-donut-plain-text" });
+    expect(read.message).toContain("infographic");
+    expect(JSON.stringify(read)).not.toContain("edgeever-infographic-v1");
+    await expect(tools.update_memo.execute({ memoId: created.id, contentMarkdown: "# no" })).rejects.toThrow(
+      "This is an infographic. Do not replace it with update_memo.",
+    );
+  });
+  test("a diagram request cannot pause to ask which notebook", async () => {
+    const f = await setup();
+    const run = { tools: [], todos: [], questions: [], pause: { ask: false } };
+    const tools = createCompanionTools({
+      ...f,
+      input: { ...f.input, message: "给我生成一个模型蒸馏的流程图" },
+      scope,
+      signal: new AbortController().signal,
+      assertActive: async () => {},
+      sources: [],
+      run,
+    });
+    const blocked = await tools.ask_user_question.execute({
+      questions: [{ id: "notebook", prompt: "流程图要保存到哪个笔记本？请提供笔记本名称。", inputType: "free_text" }],
+    });
+    expect(blocked).toMatchObject({ waiting: false, error: expect.stringContaining("等待分类") });
+    expect(run.pause.ask).toBe(false);
+    expect(run.questions).toEqual([]);
+    const allowed = await tools.ask_user_question.execute({
+      questions: [{
+        id: "strategy",
+        prompt: "按主题合并，还是按时间合并？",
+        inputType: "single_select",
+        options: [{ id: "topic", label: "主题" }, { id: "time", label: "时间" }],
+      }],
+    });
+    expect(allowed).toMatchObject({ waiting: true });
+    expect(run.questions).toHaveLength(1);
+  });
+  test("creating a note without a notebook fails when the inbox is missing", async () => {
+    const f = await setup();
+    const tools = createCompanionTools({ ...f, scope, signal: new AbortController().signal, assertActive: async () => {}, sources: [] });
+    await expect(tools.create_memo.execute({ title: "Nowhere", contentMarkdown: "body" })).rejects.toMatchObject({ code: "inbox_notebook_missing" });
+    expect(f.sqlite.query("SELECT COUNT(*) AS n FROM memos WHERE title = 'Nowhere'").get().n).toBe(0);
   });
   test("note templates and AI instructions execute immediately including deletes", async () => {
     const f = await setup();

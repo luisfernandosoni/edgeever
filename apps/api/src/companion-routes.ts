@@ -1,13 +1,13 @@
 import { AiAttachmentSchema, CompanionDiscoveryCompleteSchema, CompanionDiscoverySettingsInputSchema, CompanionIdSchema, CompanionMemoryImportSchema, CompanionMemoryInputSchema, CompanionMemoryUpdateSchema,
   CompanionToolExecuteSchema, CompanionTurnCheckpointSchema, CompanionTurnCompleteSchema,
-  CompanionTurnInputSchema, CompanionTurnResumeSchema, sealCompanionProcess, type AiProvider, type CompanionEvent, type CompanionSource, type CompanionToolCall, type CompanionTurnInput } from "@edgeever/shared";
+  CompanionTurnInputSchema, CompanionTurnResumeSchema, companionFailureDiagnostics, sealCompanionProcess, type AiProvider, type CompanionEvent, type CompanionSource, type CompanionToolCall, type CompanionTurnInput } from "@edgeever/shared";
 import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { AppContext, AppEnv, Bindings } from "./api-context";
 import { AppError } from "./app-error";
 import { loadDefaultAiModel, loadDefaultAiModelCredentials } from "./ai-service";
-import { apiError, forbidden, notFound } from "./http-errors";
+import { apiError, forbidden, httpExceptionError, notFound } from "./http-errors";
 import { requireUser, getWorkspaceId } from "./request-auth";
 import { beginCompanionTurn, checkpointCompanionTurn, clearCompanionHistory, companionRevision,
   forgetCompanionMemory, getCompanionTurn, listCompanionMemories, listCompanionTurns, mapCompanionTurn,
@@ -23,6 +23,8 @@ import { acknowledgeDiscovery, rememberDiscoveryFeedback, checkDiscoveries, comp
 const scopeFor = (c: AppContext): CompanionScope => ({ workspaceId: getWorkspaceId(c), ownerId: c.get("auth").actorId! });
 const fail = (c: AppContext, error: unknown) => {
   if (error instanceof AppError) return apiError(c, error.code, error.message, error.status);
+  const requestError = httpExceptionError(c, error);
+  if (requestError) return requestError;
   console.error("companion_failed", error instanceof Error ? error.name : "unknown");
   return apiError(c, "companion_failed", "The companion is unavailable. Please retry later.", 503);
 };
@@ -141,7 +143,7 @@ const streamCompanionTurn = (
         }
         const finished = await getCompanionTurn(db, scope, row.id);
         if (status === "interrupted" && finished) send({ type: "done", turn: mapCompanionTurn(finished) });
-        else send({ type: "error", ...companionGenerationFailure(error) });
+        else send({ type: "error", ...companionGenerationFailure(error), diagnostics: companionFailureDiagnostics(error) });
       } finally {
         stop.abort();
         clearTimeout(timeout);

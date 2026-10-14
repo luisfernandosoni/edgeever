@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { AI_ASSISTANT_LAUNCHER_POSITION } from "@/lib/ai-assistant-launcher";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { flexRender, getCoreRowModel, useReactTable, type ColumnDef } from "@tanstack/react-table";
-import { Check, ChevronLeft, Copy, Download, Form, Paperclip, Plus, RefreshCw, Table2, Trash2, X } from "lucide-react";
+import { Check, ChevronLeft, Copy, Download, Form, Paperclip, Plus, RefreshCw, Sparkles, Table2, Trash2, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
   addTableField,
@@ -27,6 +28,7 @@ import {
   updateTableCell,
   updateTableField,
   type MemoDetail,
+  type Notebook,
   type TableAttachment,
   type TableCellValue,
   type TableDocument,
@@ -36,6 +38,9 @@ import {
   type TableFilterOperator,
   type TableRecord,
 } from "@edgeever/shared";
+import { AiSidebar, readAiSidebarOpen, writeAiSidebarOpen } from "@/components/ai-sidebar/AiSidebar";
+import { AiSidebarErrorBoundary } from "@/components/ai-sidebar/AiSidebarErrorBoundary";
+import { IconTooltip } from "@/components/editor/EditorPaneChrome";
 import { MemoTitleInput } from "@/components/MemoTitleInput";
 import { TableFormDialog } from "@/components/dialogs/TableFormDialog";
 import { Button } from "@/components/ui/button";
@@ -51,7 +56,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { api } from "@/lib/api";
 import { copyImageUrlToClipboard } from "@/lib/clipboard";
 import { toDesktopResourceDownloadUrl, toDesktopResourceUrl } from "@/lib/desktop-resources";
-import { EDITOR_LOCAL_SAVE_DELAY_MS } from "@/lib/app-helpers";
+import { EDITOR_LOCAL_SAVE_DELAY_MS, formatShortcutBinding, getNotebookMoveOptions, type ShortcutSettings } from "@/lib/app-helpers";
 import { createLocalEditSession } from "@/components/editor/editor-pane-helpers";
 import { isLocalMemoId } from "@/lib/local-mirror";
 import { isBrowserOffline } from "@/lib/network-status";
@@ -60,10 +65,17 @@ import type { MemoEditSession } from "@edgeever/shared";
 
 type TableEditorPaneProps = {
   memo: MemoDetail;
+  notebooks: Notebook[];
   repository: EdgeEverRepository;
   readOnly: boolean;
   onBackToList: () => void;
   onSaved: (memo: MemoDetail) => Promise<void>;
+  aiAssistantOpenToken: number;
+  shortcutSettings: ShortcutSettings;
+  companionAvailable: boolean;
+  beforeCompanionApply?: () => Promise<void>;
+  onCompanionNotesChanged?: () => Promise<void>;
+  onOpenCompanionNote?: (id: string, notebookId: string) => void;
 };
 
 type EditingCell = { recordId: string; fieldId: string };
@@ -111,12 +123,11 @@ const FieldHeader = ({
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          className="flex w-full min-w-36 items-center justify-between gap-2 rounded-md px-2 py-1 text-left text-xs font-medium text-slate-600 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-900/20"
+          className="flex w-full min-w-36 items-center rounded-md px-2 py-1 text-left text-xs font-medium text-slate-600 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-900/20"
           aria-label={t("structuredTable.editField", { name: field.name })}
           disabled={readOnly}
         >
           <span className="truncate">{field.name}</span>
-          <span className="shrink-0 text-xs text-slate-400">{t(`structuredTable.types.${field.type}`)}</span>
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-64 space-y-2 p-2">
@@ -467,10 +478,17 @@ const RecordCell = ({
 
 export const TableEditorPane = ({
   memo,
+  notebooks,
   repository,
   readOnly,
   onBackToList,
   onSaved,
+  aiAssistantOpenToken,
+  shortcutSettings,
+  companionAvailable,
+  beforeCompanionApply,
+  onCompanionNotesChanged,
+  onOpenCompanionNote,
 }: TableEditorPaneProps) => {
   const { t } = useTranslation();
   const parsed = useMemo(() => parseTableDocument(memo.contentMarkdown), [memo.contentMarkdown]);
@@ -483,6 +501,13 @@ export const TableEditorPane = ({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveFailed, setSaveFailed] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
+  const [aiAssistantOpen, setAiAssistantOpenState] = useState(readAiSidebarOpen);
+  const setAiSidebarOpen = useCallback((open: boolean) => {
+    setAiAssistantOpenState(open);
+    writeAiSidebarOpen(open);
+  }, []);
+  const handledAiAssistantOpenTokenRef = useRef(aiAssistantOpenToken);
+  const notebookOptions = useMemo(() => getNotebookMoveOptions(notebooks), [notebooks]);
   const [refreshing, setRefreshing] = useState(false);
   const refreshingRef = useRef(false);
   const formQuery = useQuery({
@@ -502,10 +527,26 @@ export const TableEditorPane = ({
   const pendingUploadIdsRef = useRef(new Set<string>());
   const savedSnapshotRef = useRef(parsed ? snapshotOf(memo.title ?? "", parsed) : "");
   const saveRef = useRef<() => void>(() => undefined);
-  if (memo.revision >= memoRef.current.revision) memoRef.current = memo;
   titleRef.current = title;
   documentRef.current = document;
   editingRef.current = editing;
+
+  useEffect(() => {
+    // Keep the displayed table and its save base in sync after AI/server edits.
+    // An active local edit must retain its original revision for conflict checks.
+    if (!parsed || dirty || saving || editing || memo.revision < memoRef.current.revision) return;
+    const nextTitle = memo.title ?? "";
+    const nextSnapshot = snapshotOf(nextTitle, parsed);
+    memoRef.current = memo;
+    if (nextSnapshot === savedSnapshotRef.current) return;
+    setTitle(nextTitle);
+    titleRef.current = nextTitle;
+    setDocument(parsed);
+    documentRef.current = parsed;
+    savedSnapshotRef.current = nextSnapshot;
+    setSaveError(null);
+    setSaveFailed(false);
+  }, [dirty, editing, memo, parsed, saving]);
 
   useEffect(() => {
     editSessionRef.current = null;
@@ -529,6 +570,14 @@ export const TableEditorPane = ({
     });
     return () => { cancelled = true; };
   }, [memo.id, memo.contentHash, memo.revision, parsed, readOnly, t]);
+
+  useEffect(() => {
+    if (handledAiAssistantOpenTokenRef.current === aiAssistantOpenToken) return;
+    handledAiAssistantOpenTokenRef.current = aiAssistantOpenToken;
+    if (readOnly || formOpen) return;
+    setAiSidebarOpen(true);
+    if (dirty) saveRef.current();
+  }, [aiAssistantOpenToken, dirty, formOpen, readOnly, setAiSidebarOpen]);
 
   const changeDocument = (next: TableDocument) => {
     setDocument(next);
@@ -673,16 +722,63 @@ export const TableEditorPane = ({
 
   const table = useReactTable({ data: visibleRecords, columns, getCoreRowModel: getCoreRowModel(), getRowId: (row) => row.id });
 
+  const assistantMarkdown = document ? serializeTableDocument(document) : memo.contentMarkdown;
+  const assistantLauncher = !readOnly && !aiAssistantOpen ? (
+    <IconTooltip
+      side="left"
+      label={`${t("aiAssistant.open")} (${formatShortcutBinding(shortcutSettings.openAiAssistant)})`}
+    >
+      <Button
+        type="button"
+        variant="outline"
+        size="icon"
+        data-ai-assistant-launcher=""
+        className={`${AI_ASSISTANT_LAUNCHER_POSITION} absolute z-30 size-11 rounded-full border-slate-200 bg-card text-slate-950 shadow-[0_8px_24px_rgba(15,23,42,0.14)] hover:bg-card hover:text-slate-950`}
+        aria-label={t("aiAssistant.open")}
+        onClick={() => {
+          setAiSidebarOpen(true);
+          if (dirty) saveRef.current();
+        }}
+      >
+        <Sparkles className="size-5" strokeWidth={1.75} />
+      </Button>
+    </IconTooltip>
+  ) : null;
+  const assistantSidebar = (
+    <AiSidebarErrorBoundary open={aiAssistantOpen} onOpenChange={setAiSidebarOpen}>
+      <AiSidebar
+        open={aiAssistantOpen}
+        onOpenChange={setAiSidebarOpen}
+        companionAvailable={companionAvailable}
+        contentMarkdown={assistantMarkdown}
+        memoId={memo.id}
+        notebookId={memo.notebookId}
+        notebookTitle={notebookOptions.find((notebook) => notebook.id === memo.notebookId)?.name}
+        noteTitle={title}
+        beforeCompanionApply={async () => {
+          if (dirty && !(await save())) throw new Error("save failed");
+          await beforeCompanionApply?.();
+        }}
+        onCompanionNotesChanged={onCompanionNotesChanged}
+        onOpenCompanionNote={onOpenCompanionNote}
+      />
+    </AiSidebarErrorBoundary>
+  );
+
   if (!document) {
     return (
-      <div className="flex h-full min-h-0 flex-col bg-card">
-        <div className="flex items-center gap-2 border-b border-slate-200 px-3 py-2">
-          <Button type="button" variant="ghost" size="sm" onClick={onBackToList}>
-            <ChevronLeft className="h-4 w-4" />
-            {t("structuredTable.back")}
-          </Button>
+      <div className="relative flex h-full min-h-0 min-w-0 bg-card">
+        <div className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col">
+          <div className="flex items-center gap-2 border-b border-slate-200 px-3 py-2">
+            <Button type="button" variant="ghost" size="sm" onClick={onBackToList}>
+              <ChevronLeft className="h-4 w-4" />
+              {t("structuredTable.back")}
+            </Button>
+          </div>
+          <p className="p-6 text-sm text-slate-500">{t("structuredTable.unreadable")}</p>
+          {assistantLauncher}
         </div>
-        <p className="p-6 text-sm text-slate-500">{t("structuredTable.unreadable")}</p>
+        {assistantSidebar}
       </div>
     );
   }
@@ -746,11 +842,12 @@ export const TableEditorPane = ({
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-card">
+    <div className="relative flex h-full min-h-0 min-w-0 bg-card">
+    <div className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col">
       <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 px-3 py-2">
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button type="button" variant="ghost" size="icon" aria-label={t("structuredTable.back")} onClick={onBackToList}>
+            <Button type="button" variant="ghost" size="icon" className="lg:hidden" aria-label={t("structuredTable.back")} onClick={onBackToList}>
               <ChevronLeft className="h-4 w-4" />
             </Button>
           </TooltipTrigger>
@@ -983,6 +1080,9 @@ export const TableEditorPane = ({
           <p className="px-4 py-8 text-sm text-slate-500">{filtered ? t("structuredTable.noMatches") : t("structuredTable.empty")}</p>
         ) : null}
       </div>
+      {assistantLauncher}
+    </div>
+    {assistantSidebar}
     </div>
   );
 };
