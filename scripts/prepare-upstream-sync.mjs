@@ -41,6 +41,7 @@ function resolveCommit(cwd, revision) {
 
 function restoreProtectedUpdater(cwd, baseCommit) {
   for (const path of protectedUpdaterPaths) {
+    runGit(["rm", "-r", "-f", "--ignore-unmatch", "--", path], { cwd });
     const pathExists = runGit(["cat-file", "-e", `${baseCommit}:${path}`], {
       allowFailure: true,
       cwd,
@@ -51,8 +52,6 @@ function restoreProtectedUpdater(cwd, baseCommit) {
         ["restore", `--source=${baseCommit}`, "--staged", "--worktree", "--", path],
         { cwd },
       );
-    } else {
-      runGit(["rm", "-r", "-f", "--ignore-unmatch", "--", path], { cwd });
     }
   }
 }
