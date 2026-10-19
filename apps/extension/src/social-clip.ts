@@ -1,5 +1,5 @@
 import {
-  markdownText, markdownUrl, platformHtmlMarkdown, platformTarget, platformText,
+  markdownText, markdownUrl, platformHtmlMarkdown, platformReadableCopy, platformElementHidden, platformTarget, platformText,
   publishedTime, safePlatformUrl, socialPlatform, type PlatformRead, type PlatformTarget, type PublishedTime,
 } from "./platform-clip";
 
@@ -42,9 +42,9 @@ const paragraphs = (doc: Document, value: string) => {
   return body;
 };
 const plainSocialMarkdown = (doc: Document, value: string, base: string) =>
-  platformHtmlMarkdown(paragraphs(doc,value),base).replace(/[<>]/g,(char)=>`\\${char}`);
+  platformHtmlMarkdown(paragraphs(doc,value),base);
 /** Normalize text newlines in a detached body before shared Markdown conversion. */
-const socialBodyMarkdown = (doc: Document, body: Element, base: string) => {
+export const socialBodyMarkdown = (doc: Document, body: Element, base: string) => {
   const visit = (node: Node) => {
     for (const child of Array.from(node.childNodes)) {
       if (child.nodeType !== 3) { visit(child); continue; }
@@ -88,6 +88,7 @@ const result = (target: PlatformTarget, markdown: string, author?: string, time?
 };
 
 export const ownPostLinks = (card: Element, platform: string) => Array.from(card.querySelectorAll("a[href]")).filter((link) => {
+  if (platformElementHidden(link)) return false;
   if (platform === "facebook") return link.closest('[role="article"], article') === card
     && !link.closest('[data-ad-preview="message"], [data-ad-comet-preview="message"]');
   if (platform === "bluesky") return link.closest('[data-testid^="postThreadItem-by-"], [data-testid^="feedItem-by-"]') === card
@@ -101,7 +102,7 @@ export const linkedinCardTarget = (card: Element): PlatformTarget | null => {
     const target = platformTarget(`https://www.linkedin.com/feed/update/${card.getAttribute(key) || ""}/`);
     if (target) return target;
   }
-  // The signed-in SDUI card exposes its UGC identity in the main commentary,
+  // The signed-in SDUI card exposes its post identity in the main commentary,
   // not an activity data attribute. Never use comment or nested card IDs.
   for (const commentary of Array.from(card.querySelectorAll('[id^="translatable-commentary-"]'))) {
     if (commentary.closest(LINKEDIN_CARD_SELECTOR) !== card) continue;
@@ -109,19 +110,37 @@ export const linkedinCardTarget = (card: Element): PlatformTarget | null => {
     if (!identity.includes("contentUrnCommentUrn=null")) continue;
     const id = /userGeneratedContentId=([1-9]\d*)\)/.exec(identity)?.[1];
     if (id) return platformTarget(`https://www.linkedin.com/feed/update/urn:li:ugcPost:${id}/`);
+    const shareId = /shareId=([1-9]\d*)\)/.exec(identity)?.[1];
+    if (shareId) return platformTarget(`https://www.linkedin.com/feed/update/urn:li:share:${shareId}/`);
   }
   return null;
 };
 
+const facebookTargetIds = (doc: Document, target: PlatformTarget) => {
+  const ids = new Set([target.id]);
+  for (const item of pageRecords(doc, target.id)) {
+    if (text(item.post_id) === target.id) {
+      const alias = platformTarget(text(item.permalink_url || item.url));
+      if (alias?.platform === "facebook") ids.add(alias.id);
+    }
+    // The signed-in permalink dialog can declare a different pfbid for the same post.
+    if (item.canonicalRouteName !== "comet.fbweb.CometSinglePostDialogRoute"
+      || !sameTarget(safePlatformUrl(text(item.url), target.url), target)) continue;
+    const params = record(item.params);
+    const alias = platformTarget(`https://www.facebook.com/${text(params?.page_token)}/posts/${text(params?.story_token)}`);
+    if (alias?.platform === "facebook") ids.add(alias.id);
+  }
+  return ids;
+};
+
 export const socialPostCard = (doc: Document, target: PlatformTarget): Element | null => {
   if (target.platform === "facebook") {
-    const aliases=pageRecords(doc,target.id).filter((item)=>text(item.post_id) === target.id)
-      .map((item)=>platformTarget(text(item.permalink_url || item.url))?.id).filter(Boolean);
+    const ids = facebookTargetIds(doc, target);
     return Array.from(doc.querySelectorAll('[role="article"], article')).find((card) =>
       ownPostLinks(card,target.platform).some((a) => {
         const url=postLinkUrl(a,target.url);
         return a.closest('[role="article"], article') === card && !/[?&]comment_id=/.test(url)
-          && (sameTarget(url,target) || aliases.includes(platformTarget(url)?.id));
+          && ids.has(platformTarget(url)?.id || "");
       })) || null;
   }
   if (target.platform === "linkedin") {
@@ -153,34 +172,56 @@ const blueskyImages = (card: Element, base: string) => Array.from(card.querySele
 export const readBluesky = (doc: Document, target: PlatformTarget): PlatformRead => {
   const entry = pageRecords(doc, target.id.split("/").pop()!, "application/ld+json")
     .find((value) => value["@type"] === "DiscussionForumPosting" && sameTarget(value.url, target));
-  const card = socialPostCard(doc, target);
-  if (!card || card.closest('[hidden], [aria-hidden="true"]')) return { ok: false, reason: "unreadable" };
-  const post = card.querySelector('[data-testid="contentHider-post"]') || card;
-  const body = post.querySelector('[data-testid="postText"], [data-word-wrap="1"]');
+  const liveCard = socialPostCard(doc, target);
+  if (!liveCard) return { ok: false, reason: "unreadable" };
+  const card = platformReadableCopy(liveCard);
+  const owns = (node: Element) => node.closest('[data-testid^="postThreadItem-by-"], [data-testid^="feedItem-by-"]') === card;
+  const post = Array.from(card.querySelectorAll('[data-testid="contentHider-post"]')).find(owns) || card;
+  const body = Array.from(post.querySelectorAll('[data-testid="postText"], [data-word-wrap="1"]'))
+    .find((node)=>owns(node) && !node.closest(BLUESKY_QUOTE_SELECTOR));
   if (post.closest('[hidden], [aria-hidden="true"]') || body?.closest('[hidden], [aria-hidden="true"]')) return {ok:false,reason:"unreadable"};
   const bodyCopy = body?.cloneNode(true) as Element | undefined;
   bodyCopy?.querySelectorAll('script, style, noscript, template, [hidden], [aria-hidden="true"]')
     .forEach((node)=>node.remove());
   // Rendered text owns the links and readability; SEO text must not restore
   // descendants hidden by the current page, including in the note title.
-  const content = bodyCopy ? bodyCopy.textContent || "" : text(entry?.text);
+  const content = bodyCopy?.textContent || "";
+  if (!content.trim() && text(entry?.text).trim()) return {ok:false,reason:"unreadable"};
   const copy = post.cloneNode(true) as Element;
+  for (const button of Array.from(copy.querySelectorAll('button[aria-label]'))) {
+    if (!button.querySelector('img[src*="/img/feed_"][alt]')) continue;
+    const badge = button.nextElementSibling as HTMLElement | null;
+    if (badge?.style.position === "absolute" && /^(?:ALT|替代文本)$/.test(platformText(badge))
+      && !badge.querySelector('img,a,button')) badge.remove();
+  }
   copy.querySelectorAll('button, [data-testid="userAvatarImage"], svg').forEach((node)=> {
-    if(node.tagName.toLowerCase() === "button" && node.querySelector('img[src*="/img/feed_"]')) node.replaceWith(...Array.from(node.childNodes));
+    if(node.tagName.toLowerCase() === "button" && node.querySelector('img[src*="/img/feed_"]')) node.replaceWith(...Array.from(node.querySelectorAll('img[src*="/img/feed_"]')));
     else node.remove();
   });
-  const parts = [bodyCopy ? socialBodyMarkdown(doc,bodyCopy,target.url).replace(/[<>]/g,(char)=>`\\${char}`)
+  const parts = [bodyCopy ? socialBodyMarkdown(doc,bodyCopy,target.url)
     : content ? plainSocialMarkdown(doc,content,target.url) : ""];
   // Feed cards have no post SEO data; their exact timestamp permalink and
   // visible body are sufficient. A collection count still guards hidden images.
   const visibleImages=blueskyImages(post,target.url);
   const images = Array.isArray(entry?.image) ? entry.image : [];
   if (images.length) for(const url of images) {
-    const img=Array.from(post.querySelectorAll("img")).find((item)=>item.getAttribute("src")===url);
-    parts.push(imageMarkdown(blueskyFullsizeUrl(text(url)),img?.getAttribute("alt"),target.url));
-  } else parts.push(...visibleImages);
+    const img=Array.from(post.querySelectorAll("img")).find((item)=>blueskyFullsizeUrl(item.getAttribute("src") || "")===blueskyFullsizeUrl(text(url)) && !item.closest(BLUESKY_QUOTE_SELECTOR));
+    if (!img || !imageMarkdown(url,"",target.url)) return {ok:false,reason:"incomplete"};
+  }
+  parts.push(...visibleImages);
   for (const quote of Array.from(copy.querySelectorAll(BLUESKY_QUOTE_SELECTOR))) {
     for (const img of Array.from(quote.querySelectorAll("img[src]"))) img.setAttribute("src",blueskyFullsizeUrl(img.getAttribute("src") || ""));
+    // Link previews wrap a block of image/title/description. Keep the image
+    // separately and the complete label inline so Markdown forms a real link.
+    for (const link of Array.from(quote.querySelectorAll("a[href]"))) {
+      if (!link.querySelector("div")) continue;
+      const labelCopy = link.cloneNode(true) as Element;
+      for (const block of Array.from(labelCopy.querySelectorAll("div,p"))) block.appendChild(doc.createTextNode(" "));
+      const label = platformText(labelCopy);
+      if (!label) continue;
+      for (const image of Array.from(link.querySelectorAll("img"))) link.parentNode!.insertBefore(image, link);
+      link.textContent = label;
+    }
     parts.push(platformHtmlMarkdown(quote,target.url));
   }
   const author = text(record(entry?.author)?.name) || Array.from(card.querySelectorAll('a[href]'))
@@ -199,10 +240,12 @@ export const metaPostCard = (link: Element, platform: string, base: string): Ele
   if (!link.querySelector("time[datetime]") || link.closest("[hidden], [aria-hidden='true'], script, style, template")) return null;
   const target = platformTarget(postLinkUrl(link,base));
   if (!target || target.platform !== platform) return null;
+  const pressable = platform === 'threads' ? link.closest('[data-pressable-container]') : null;
   let card = link.parentElement;
   for (let depth=0; card && depth<12; depth++,card=card.parentElement) {
     if (card.matches('main, [role="main"], [role="region"], [role="dialog"], body')) break;
     const timestamps = Array.from(card.querySelectorAll('a[href]')).filter((a)=>a.querySelector('time[datetime]')
+      && (!pressable || a.closest('[data-pressable-container]') === pressable)
       && (!a.closest('article, [role="article"]') || a.closest('article, [role="article"]') === card));
     if (timestamps.some((a)=> {
       const other=platformTarget(postLinkUrl(a,base));
@@ -225,11 +268,18 @@ const readableMetaCard = (doc: Document, target: PlatformTarget, captions: strin
     if (!sameTarget(postLinkUrl(link,target.url),target)) continue;
     const card = metaPostCard(link,target.platform,target.url);
     if (!card) continue;
-    const copy=card.cloneNode(true) as Element;
+    const copy=platformReadableCopy(card);
     copy.querySelectorAll("script, style, template, article, [role='article'], [hidden], [aria-hidden='true']").forEach((node)=>node.remove());
+    if (target.platform === 'threads') Array.from(copy.querySelectorAll('[data-pressable-container]')).forEach(node=>node.remove());
     // Threads shortens visible URL labels; its card's href retains the destination.
     if (target.platform === 'threads') for (const a of Array.from(copy.querySelectorAll('a[href]'))) {
-      const href=safePlatformUrl(a.getAttribute('href') || '',target.url);
+      let href=safePlatformUrl(a.getAttribute('href') || '',target.url);
+      if (href) {
+        const url=new URL(href);
+        if (url.origin === 'https://l.threads.com' && url.pathname === '/') {
+          href=safePlatformUrl(url.searchParams.get('u') || '',target.url);
+        }
+      }
       const label=[href,href.replace(/^https?:\/\//,'')].find((value)=>value && expected.some((caption)=>caption.includes(value)));
       if (label) a.textContent=label;
     }
@@ -242,7 +292,6 @@ const readableMetaCard = (doc: Document, target: PlatformTarget, captions: strin
 const metaMedia = (doc: Document, target: PlatformTarget) => {
   const code = target.id.split("/").pop()!;
   return pageRecords(doc, code).find((item) => item.code === code
-    && record(item.user)?.username && (item.taken_at !== undefined)
     && (item.caption !== undefined || item.image_versions2 !== undefined || item.carousel_media !== undefined));
 };
 const mediaImages = (item: RecordValue, base: string): string[] | null => {
@@ -268,7 +317,7 @@ export const readMetaSocial = (doc: Document, target: PlatformTarget): PlatformR
   const media = metaMedia(doc, target);
   if (!media) return { ok: false, reason: "unreadable" };
   const username = text(record(media.user)?.username);
-  if (target.platform === "threads" && username.toLowerCase() !== target.id.split("/")[0]) return { ok:false, reason:"changed" };
+  if (target.platform === "threads" && username && username.toLowerCase() !== target.id.split("/")[0]) return { ok:false, reason:"changed" };
   let caption = text(record(media.caption)?.text);
   // A visible slide establishes readability; preserve all loaded slide captions.
   const captions = [caption];
@@ -308,19 +357,31 @@ export const readMetaSocial = (doc: Document, target: PlatformTarget): PlatformR
 
 export const facebookExpandButton = (card: Element | null) => card
   ? Array.from(card.querySelectorAll<HTMLElement>('[data-ad-preview="message"] [role="button"], [data-ad-preview="message"] button, [data-ad-comet-preview="message"] [role="button"]'))
-    .find((button) => /^(?:See more|展开|查看更多|もっと見る|Zobacz więcej)$/i.test(platformText(button))) : undefined;
+    .find((button) => !platformElementHidden(button) && /^(?:See more|展开|查看更多|もっと見る|Zobacz więcej)$/i.test(platformText(button))) : undefined;
 
 export const readFacebook = (doc: Document, target: PlatformTarget): PlatformRead => {
-  const card = socialPostCard(doc, target);
-  if (!card || card.closest('[hidden], [aria-hidden="true"]')) return {ok:false, reason:"unreadable"};
-  if (facebookExpandButton(card)) return {ok:false, reason:"incomplete"};
-  const body = card.querySelector('[data-ad-preview="message"], [data-ad-comet-preview="message"]');
+  const liveCard = socialPostCard(doc, target);
+  if (!liveCard) return {ok:false, reason:"unreadable"};
+  if (facebookExpandButton(liveCard)) return {ok:false, reason:"incomplete"};
+  const card = platformReadableCopy(liveCard);
+  const ownBody=(root: Element)=>Array.from(root.querySelectorAll('[data-ad-preview="message"], [data-ad-comet-preview="message"]'))
+    .find((node)=>node.closest('[role="article"], article') === root);
+  const body = ownBody(card);
+  const liveBody=ownBody(liveCard);
+  if (platformText(liveBody) && !platformText(body)) return {ok:false,reason:"unreadable"};
   if (body?.closest('[hidden], [aria-hidden="true"]')) return {ok:false,reason:"unreadable"};
-  const records = pageRecords(doc, target.id);
-  const story = records.find((item) => item.__typename === "Story" && (sameTarget(item.permalink_url || item.url, target) || text(item.post_id) === target.id) && item.creation_time !== undefined);
+  const ids = facebookTargetIds(doc, target);
+  const records = [...ids].flatMap(id => pageRecords(doc, id));
+  const story = records.find((item) => item.__typename === "Story"
+    && (ids.has(platformTarget(text(item.permalink_url || item.url))?.id || "") || ids.has(text(item.post_id))));
+  const contentStory=record(record(record(story?.comet_sections)?.content)?.story);
+  if (!platformText(body) && text(record(contentStory?.message)?.text).trim()) return {ok:false,reason:"unreadable"};
   const cleanBody = body?.cloneNode(true) as Element | undefined;
+  for (const button of Array.from(cleanBody?.querySelectorAll('button, [role="button"]') || [])) {
+    if (/^(?:收起|See less)$/i.test(platformText(button))) button.remove();
+  }
   for (const emoji of Array.from(cleanBody?.querySelectorAll('img[src*="/images/emoji.php"]') || [])) emoji.replaceWith(doc.createTextNode(emoji.getAttribute("alt") || ""));
-  const parts = [cleanBody ? platformHtmlMarkdown(cleanBody,target.url) : ""];
+  const parts = [cleanBody ? socialBodyMarkdown(doc,cleanBody,target.url) : ""];
   const copy = card.cloneNode(true) as Element;
   copy.querySelectorAll('[role="article"], article, [role="toolbar"], [data-ad-preview="message"], [data-ad-comet-preview="message"]').forEach((node)=>node.remove());
   const seen = new Set<string>();
@@ -329,13 +390,29 @@ export const readFacebook = (doc: Document, target: PlatformTarget): PlatformRea
     if (!url || !/\.fbcdn\.net\//.test(url) || !/\/v\//.test(url) || seen.has(url)) continue;
     seen.add(url); parts.push(imageMarkdown(url, img.getAttribute("alt"), target.url));
   }
+  // Page-declared photos verify the rendered attachment; they cannot restore
+  // a missing or hidden image. CDN resize/signature queries do not change it.
+  const photos = new Set<string>();
+  const photoIdentity = (value: string) => {
+    const safe=safePlatformUrl(value,target.url);
+    return safe ? new URL(safe).pathname : "";
+  };
+  const collectPhotos = (value: unknown) => {
+    const obj=record(value);
+    if (!obj) { if(Array.isArray(value)) value.forEach(collectPhotos); return; }
+    const uri=text(record(obj.photo_image)?.uri);
+    if (uri) photos.add(photoIdentity(uri));
+    Object.values(obj).forEach(collectPhotos);
+  };
+  collectPhotos(story?.attachments);
+  if (Array.from(photos).some(photo=>!Array.from(seen).some(url=>photoIdentity(url)===photo))) return {ok:false,reason:"incomplete"};
   // A hidden remainder of a photo collection must not be called complete.
   if (Array.from(copy.querySelectorAll("a, [role='button']")).some((node)=>/^\+\d+$/.test(platformText(node)))) return {ok:false, reason:"incomplete"};
   const actor = Array.isArray(story?.actors) ? record(story.actors[0]) : undefined;
   const author = text(actor?.name) || platformText(card.querySelector('h2 a, h3 a, strong a'));
-  const saved = result(target,parts.filter(Boolean).join("\n\n"),author,epochTime(story?.creation_time),platformText(body).slice(0,100) || author);
+  const saved = result(target,parts.filter(Boolean).join("\n\n"),author,epochTime(story?.creation_time),platformText(cleanBody).slice(0,100) || author);
   if (saved.ok && !saved.clip.publishedAt) {
-    const link = ownPostLinks(card,target.platform).find((a)=>sameTarget(postLinkUrl(a,target.url),target));
+    const link = ownPostLinks(card,target.platform).find((a)=>ids.has(platformTarget(postLinkUrl(a,target.url))?.id || ""));
     saved.clip.publishedAt = publishedTime(link?.querySelector("time, abbr") || link || null);
   }
   return saved;
@@ -343,7 +420,7 @@ export const readFacebook = (doc: Document, target: PlatformTarget): PlatformRea
 
 export const linkedinExpandButton = (card: Element | null) => card
   ? Array.from(card.querySelectorAll<HTMLElement>('button.see-more, .feed-shared-inline-show-more-text__see-more-less-toggle, [data-test-id="show-more-less-text__button"]'))
-    .find((button)=>!button.hidden && button.getAttribute("aria-expanded") !== "true"
+    .find((button)=>!platformElementHidden(button) && button.getAttribute("aria-expanded") !== "true"
       && !/^(?:See less|Show less|收起|折りたたむ|Zobacz mniej)$/i.test(platformText(button))) : undefined;
 const linkedinBodyMarkdown = (doc: Document, body: Element, base: string) => {
   const clean = body.cloneNode(true) as Element;
@@ -370,8 +447,9 @@ const linkedinBodyMarkdown = (doc: Document, body: Element, base: string) => {
   return socialBodyMarkdown(doc,clean,base);
 };
 export const readLinkedin = (doc: Document, target: PlatformTarget): PlatformRead => {
-  const card = socialPostCard(doc,target);
-  if (!card || card.closest('[hidden], [aria-hidden="true"]')) return {ok:false,reason:"unreadable"};
+  const liveCard = socialPostCard(doc,target);
+  if (!liveCard) return {ok:false,reason:"unreadable"};
+  const card = platformReadableCopy(liveCard);
   // A guest card declares both the UGC attribution and its public activity URN.
   // Its JSON-LD uses the activity ID even when the requested URL uses the UGC ID.
   const cardTarget = linkedinCardTarget(card) || target;
@@ -379,19 +457,28 @@ export const readLinkedin = (doc: Document, target: PlatformTarget): PlatformRea
     && (sameTarget(item["@id"] || item.url,target) || sameTarget(item["@id"] || item.url,cardTarget)));
   const sduiBody = Array.from(card.querySelectorAll('[id^="translatable-commentary-"] [data-testid="expandable-text-box"]'))
     .find((node) => node.closest(LINKEDIN_CARD_SELECTOR) === card);
-  const body = card.querySelector('[data-test-id="main-feed-activity-card__commentary"], .feed-shared-update-v2__description .update-components-text, .feed-shared-text') || sduiBody;
+  const ownBody=(root: Element)=>Array.from(root.querySelectorAll('[data-test-id="main-feed-activity-card__commentary"], .feed-shared-update-v2__description .update-components-text, .feed-shared-text, [id^="translatable-commentary-"] [data-testid="expandable-text-box"]'))
+    .find((node)=>node.closest(LINKEDIN_CARD_SELECTOR) === root);
+  const body = ownBody(card);
   if (body?.closest('[hidden], [aria-hidden="true"]')) return {ok:false,reason:"unreadable"};
   if (!schema && linkedinExpandButton(card)) return {ok:false,reason:"incomplete"};
   const fullText = text(schema?.articleBody);
+  if (fullText.trim() && !platformText(body)) return {ok:false,reason:"unreadable"};
+  const liveBody = ownBody(liveCard);
   const domMarkdown = body ? linkedinBodyMarkdown(doc,body,target.url) : '';
   const normalize = (value: string) => value.replace(/\s+/g,' ').trim();
   const completeBody = body && (!fullText || normalize(body.textContent || '') === normalize(fullText));
+  if (!completeBody && fullText && body && platformText(liveBody) !== platformText(body)) return {ok:false,reason:"incomplete"};
   const parts = [completeBody ? domMarkdown : (fullText ? linkedinBodyMarkdown(doc,paragraphs(doc,fullText),target.url) : domMarkdown)];
   if (schema && Array.isArray(schema.image)) {
     const visibleImages=card.querySelectorAll('[data-test-id="feed-images-content__list-item"] img');
     const remainder=Number(platformText(card.querySelector('[data-test-id="feed-images-content__overlay"]')).replace(/^\+/,"")) || 0;
     if (schema.image.length < visibleImages.length + remainder) return {ok:false,reason:"incomplete"};
-    for (const img of schema.image) parts.push(imageMarkdown(record(img)?.url || img,"",target.url));
+    for (const img of schema.image) {
+      const markdown=imageMarkdown(record(img)?.url || img,"",target.url);
+      if (!markdown) return {ok:false,reason:"incomplete"};
+      parts.push(markdown);
+    }
   } else {
     const media = card.querySelector('[data-testid="carousel-container"]');
     const sduiImages = media?.querySelectorAll('[data-testid="carousel-child-container"] img') || [];
@@ -402,16 +489,37 @@ export const readLinkedin = (doc: Document, target: PlatformTarget): PlatformRea
     }
     if (count && sduiImages.length < Number(count[1])) return {ok:false,reason:"incomplete"};
     for (const img of Array.from(card.querySelectorAll('.update-components-image img, [data-test-id="feed-images-content"] img, [data-testid="carousel-child-container"] img'))) {
-      parts.push(imageMarkdown(img.getAttribute("src") || img.getAttribute("data-delayed-url"),img.getAttribute("alt"),target.url));
+      const markdown=imageMarkdown(img.getAttribute("src") || img.getAttribute("data-delayed-url"),img.getAttribute("alt"),target.url);
+      if (!markdown) return {ok:false,reason:"incomplete"};
+      parts.push(markdown);
     }
     if (card.querySelector('[data-test-id="feed-images-content__overlay"]')) return {ok:false,reason:"incomplete"};
   }
   const sduiHeader = sduiBody?.closest('[id^="translatable-commentary-"]')?.parentElement?.previousElementSibling;
-  const author = text(record(schema?.author)?.name) || platformText(card.querySelector('.update-components-actor__title, [data-tracking-control-name="public_post_feed-actor-name"]'))
-    || Array.from(sduiHeader?.querySelectorAll('a[href]') || []).map(platformText).find(Boolean);
+  const own = (selector: string) => Array.from(card.querySelectorAll(selector)).find(node => node.closest(LINKEDIN_CARD_SELECTOR) === card);
+  const actor = sduiHeader || own('.update-components-actor, [data-test-id="main-feed-activity-card__entity-lockup"]');
+  const actorLinks = Array.from(actor?.querySelectorAll('a[href]') || []).filter(link =>
+    link.closest(LINKEDIN_CARD_SELECTOR) === card && platformText(link));
+  const person = actorLinks.find(link => {
+    const url = safePlatformUrl(link.getAttribute('href') || '', target.url);
+    return url && /(^|\.)linkedin\.com$/.test(new URL(url).hostname) && new URL(url).pathname.startsWith("/in/");
+  });
+  const author = text(record(schema?.author)?.name) || platformText(own('.update-components-actor__title, [data-tracking-control-name="public_post_feed-actor-name"]'))
+    || platformText(person?.querySelector('p') || person) || actorLinks.map(platformText).find(Boolean);
+  const metadata = Array.from(sduiHeader?.querySelectorAll('p') || []).filter(node =>
+    !node.closest('a, button') && node.closest(LINKEDIN_CARD_SELECTOR) === card);
+  // SDUI inserts connection degree and professional headline before the time.
+  // Recognize the complete time label, rather than taking a paragraph by index.
+  const isTime = (node: Element) => /^(?:\d+\s*(?:s|m|h|d|w|mo|yr|seconds?|minutes?|hours?|days?|weeks?|months?|years?)(?:\s+ago)?|\d+\s*(?:秒|分钟|分鐘|小时|小時|天|周|週|个月|個月|年|時間|日|週間|か月|ヶ月|カ月)前|\d+\s*(?:sek\.|min|godz\.|dni|tyg\.|mies\.|lat)(?:\s+temu)?)(?:\s*[•·].*)?$/i.test(platformText(node));
+  const timeNode = metadata.find(isTime);
+  const headline = person ? platformText(Array.from(actor?.querySelectorAll('.update-components-actor__description, .feed-shared-actor__description') || []).find(node => node.closest(LINKEDIN_CARD_SELECTOR) === card)
+    || metadata.find(node => node !== timeNode && !/followers|关注者|關注者|フォロワー|obserwuj/i.test(platformText(node)))) : '';
   if (!parts.some((part)=>part.trim())) return {ok:false,reason:"unreadable"};
   const saved = result(target,parts.filter(Boolean).join("\n\n"),author,dateTime(schema?.datePublished),text(schema?.headline) || fullText.split("\n")[0] || (sduiBody ? parts[0].split("\n")[0].slice(0,100) : platformText(body).slice(0,100)) || author);
-  if (saved.ok && !saved.clip.publishedAt) saved.clip.publishedAt = publishedTime(card.querySelector('time, .update-components-actor__sub-description') || sduiHeader?.querySelectorAll('p')[1] || null);
+  if (saved.ok) {
+    if (headline) saved.clip.authorHeadline = headline;
+    saved.clip.publishedAt ||= publishedTime(own('time, .update-components-actor__sub-description') || timeNode || null);
+  }
   return saved;
 };
 
@@ -421,16 +529,19 @@ export const readSubstackNote = (doc: Document, target: PlatformTarget): Platfor
   const selector = '[class*="feedPermalinkUnit-"], [data-entity-key]';
   const candidates = [...Array.from(doc.querySelectorAll('[class*="feedPermalinkUnit-"]')),
     ...Array.from(doc.querySelectorAll(`[data-entity-key="${noteId}"]`))];
-  const card = candidates.find((candidate)=>
-    !candidate.closest('[hidden], [aria-hidden="true"]') && Array.from(candidate.querySelectorAll('a[href]')).some((link)=>
-      !link.closest('.ProseMirror') && link.closest(selector) === candidate && sameTarget(postLinkUrl(link,target.url),target)));
-  if (card?.hasAttribute('data-entity-key') && card.getAttribute('data-entity-key') !== noteId) return {ok:false,reason:'unreadable'};
-  if (!card || card.closest('[hidden], [aria-hidden="true"]')) return { ok:false, reason:"unreadable" };
-  const body = Array.from(card.querySelectorAll('.ProseMirror')).find((node)=>
-    node.closest(selector) === card && !node.closest('[hidden], [aria-hidden="true"]'));
+  let card: Element | undefined, body: Element | undefined;
+  for(const candidate of candidates) {
+    if(candidate.hasAttribute('data-entity-key') && candidate.getAttribute('data-entity-key') !== noteId) continue;
+    const copy=platformReadableCopy(candidate);
+    const ownBody=Array.from(copy.querySelectorAll('.ProseMirror')).find(node=>node.closest(selector) === copy && platformText(node));
+    if(!ownBody) continue;
+    if(Array.from(copy.querySelectorAll('a[href]')).some(link=>
+      !link.closest('.ProseMirror') && link.closest(selector) === copy && sameTarget(postLinkUrl(link,target.url),target))) {card=copy;body=ownBody;break;}
+  }
+  if(!card || !body) return {ok:false,reason:'unreadable'};
   const headerLink = Array.from(card.querySelectorAll('a[href]')).find((link)=>
     !link.closest('.ProseMirror') && link.closest(selector) === card && sameTarget(postLinkUrl(link,target.url),target));
-  if (!body || !headerLink || !platformText(body)) return { ok:false, reason:"unreadable" };
+  if (!headerLink) return { ok:false, reason:"unreadable" };
   if (card.querySelector('[class*="seeMore"], [class*="readMore"], [data-testid="read-more"]')) return { ok:false, reason:"incomplete" };
   const entry = pageRecords(doc,noteId,"application/ld+json").find((item)=>
     item["@type"] === "SocialMediaPosting" && item.identifier === noteId && sameTarget(item.url,target));

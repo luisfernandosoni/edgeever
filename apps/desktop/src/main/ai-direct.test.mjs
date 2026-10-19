@@ -1,5 +1,31 @@
 import { expect, test } from "bun:test";
-import { createAiDirectRuntime, validateAiProviderUrl } from "./ai-direct.mjs";
+import { canUseAiProviderUrl, createAiDirectRuntime, validateAiProviderUrl } from "./ai-direct.mjs";
+import { createPublicLookup } from "@edgeever/public-network/node";
+
+test("desktop AI eligibility checks URL and DNS policy without calling the provider", async () => {
+  for (const addresses of [
+    [{ address: "93.184.216.34", family: 4 }],
+    [{ address: "10.20.30.40", family: 4 }],
+    [{ address: "93.184.216.34", family: 4 }, { address: "192.168.1.20", family: 4 }],
+    [{ address: "::ffff:127.0.0.1", family: 6 }],
+    [],
+  ]) {
+    let lookups = 0;
+    const lookup = createPublicLookup((_host, _options, callback) => {
+      lookups++;
+      callback(null, addresses);
+    });
+    expect(await canUseAiProviderUrl("https://model.example.com/v1", lookup)).toBe(addresses.length === 1 && addresses[0].address === "93.184.216.34");
+    expect(lookups).toBe(1);
+  }
+  expect(await canUseAiProviderUrl("https://model.example.com/v1", createPublicLookup((_host, _options, callback) => callback(new Error("DNS unavailable"))))).toBe(false);
+  let lookups = 0;
+  const lookup = () => { lookups++; };
+  for (const url of ["http://model.example.com/v1", "https://127.0.0.1/v1", "https://model.lan/v1", "https://model.example.com:8443/v1"]) {
+    expect(await canUseAiProviderUrl(url, lookup)).toBe(false);
+  }
+  expect(lookups).toBe(0);
+});
 
 test("desktop AI provider transport streams POST bodies to public HTTPS hosts", async () => {
   let received;
@@ -92,7 +118,9 @@ test("desktop preload and main process expose the AI provider stream pair", asyn
     Bun.file(new URL("../preload/index.cjs", import.meta.url)).text(),
   ]);
   expect(main).toContain('ipcMain.handle("desktop:ai-direct-open"');
+  expect(main).toContain('ipcMain.handle("desktop:ai-direct-check"');
   expect(main).toContain('ipcMain.on("desktop:ai-direct-cancel"');
   expect(preload).toContain('openAiProviderStream: (requestId, input) => ipcRenderer.invoke("desktop:ai-direct-open"');
+  expect(preload).toContain('canUseAiProviderUrl: url => ipcRenderer.invoke("desktop:ai-direct-check", url)');
   expect(preload).toContain('ipcRenderer.send("desktop:ai-direct-cancel"');
 });

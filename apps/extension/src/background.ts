@@ -1,9 +1,10 @@
-import { articlePlatform } from "./article-platform";
+import { articlePlatform, substackPaywall } from "./article-platform";
+import { configurePlatformImageRequests, isPlatformImageUrl } from "./platform-image-requests";
 import {
   clipNotebookId,
   edgeEverFormRequest,
   edgeEverRequest,
-  getInstanceOrigin,
+  getInstancePermissionPattern,
   getSettings,
   listNotebooks,
   uploadMemoImage,
@@ -43,6 +44,7 @@ import {
 } from "./github-repo";
 import {
   selectionNoteMarkdown,
+  selectionTextMarkdown,
   selectionNoteTitle,
 } from "./selection-clip";
 import {
@@ -91,6 +93,9 @@ import type { OutlineAttempt, VideoNoteToast } from "./video/types";
 import { youtubeCaptureFromRead, youtubeTargetFromUrl } from "./video/youtube";
 import { t } from "./i18n";
 import { readXiaoyuzhouStateInPage } from "./xiaoyuzhou-clip";
+import { jikeLoginPost } from "./jike-clip";
+import { readJikeWebStateInPage } from "./jike-web-state";
+import { bossLoginRequired } from "./boss-clip";
 import {
   isPlatformClip,
   markdownText,
@@ -101,6 +106,7 @@ import {
   publishedTimeText,
   clipDateTimeText,
   type PlatformTarget,
+  type PublishedTime,
 } from "./platform-clip";
 
 type CapturedPage = {
@@ -109,6 +115,9 @@ type CapturedPage = {
   markdown: string;
   plainText?: string;
   kind?: "page" | "selection";
+  platform?: "medium" | "substack";
+  author?: string;
+  publishedAt?: PublishedTime;
 };
 
 type PendingImageSave = {
@@ -170,7 +179,11 @@ const REDDIT_DOCUMENT_PATTERNS = [
 
 const toMarkdown = (page: CapturedPage) => {
   const capturedAt = clipDateTimeText(new Date().toISOString());
-  return `# ${page.title.replace(/\n/g, " ")}\n\n${t("sourceLabel")}: [${page.url}](${page.url})\n\n${t("capturedAtLabel")}: ${capturedAt}\n\n---\n\n${page.markdown}`;
+  const metadata=page.platform ? [
+    page.author ? `${t("platformAuthorLabel")}: ${markdownText(page.author)}` : "",
+    page.publishedAt ? `${t("platformPublishedAtLabel")}: ${markdownText(publishedTimeText(page.publishedAt,t("platformRelativeTimeLabel")))}` : "",
+  ].filter(Boolean).map(value=>`${value}\n\n`).join("") : "";
+  return `# ${markdownText(page.title)}\n\n${t("sourceLabel")}: [${markdownText(page.url)}](${markdownUrl(page.url)})\n\n${metadata}${t("capturedAtLabel")}: ${capturedAt}\n\n---\n\n${page.markdown}`;
 };
 
 const compactError = (error: unknown) => {
@@ -207,18 +220,26 @@ const notebookForClip = async (settings: ExtensionSettings) => {
   return notebookId;
 };
 
-const createMemo = async (settings: ExtensionSettings, page: CapturedPage, tabId: number | null) => {
+const clipImageFeedback = (images: { embedded: number; total: number }) =>
+  images.embedded < images.total ? t("platformImagesPartial")
+    : images.total > 0 ? t("platformSavedWithImages") : t("savedToEdgeEver");
+
+const createMemo = async (settings: ExtensionSettings, page: CapturedPage, tabId: number | null, expectedUrl?: string) => {
   const contentMarkdown = toMarkdown(page);
+  const notebookId = await notebookForClip(settings);
+  if (expectedUrl && (tabId === null || (await chrome.tabs.get(tabId)).url !== expectedUrl)) {
+    throw new Error(t("platformPageChanged"));
+  }
   const created = await edgeEverRequest<{ memo?: CreatedClipMemo }>(settings, "/api/v1/memos", {
     method: "POST",
     body: JSON.stringify({
-      notebookId: await notebookForClip(settings),
+      notebookId,
       title: page.title,
       contentMarkdown,
-      tags: ["web-clip"],
+      tags: page.platform ? ["web-clip",page.platform] : ["web-clip"],
     }),
   });
-  await embedClipImages(settings, created.memo, contentMarkdown, page.url, tabId, null);
+  return embedClipImages(settings, created.memo, contentMarkdown, page.url, tabId, null);
 };
 
 const createGithubRepoMemo = async (settings: ExtensionSettings, facts: GithubRepoFacts) => {
@@ -260,7 +281,7 @@ const imageNoteClient = (settings: ExtensionSettings): ImageNoteClient => ({
   createEditSession: (memoId) => edgeEverRequest(
     settings,
     `/api/v1/memos/${encodeURIComponent(memoId)}/edit-sessions`,
-    { method: "POST", body: JSON.stringify({}) },
+    { method: "POST" },
   ),
   saveMemo: (memoId, body) => edgeEverRequest(
     settings,
@@ -356,7 +377,7 @@ const ensureClipperReady = async () => {
   if (!settings.instanceUrl || !settings.token) {
     throw new Error(t("completePluginConfiguration"));
   }
-  const granted = await chrome.permissions.contains({ origins: [`${getInstanceOrigin(settings.instanceUrl)}/*`] });
+  const granted = await chrome.permissions.contains({ origins: [getInstancePermissionPattern(settings.instanceUrl)] });
   if (!granted) throw new Error(t("instancePermissionRequired"));
   return settings;
 };
@@ -401,6 +422,7 @@ const requestSignal = (timeoutMs: number, signal?: AbortSignal) => {
   return controller.signal;
 };
 
+let platformImageRulesReady: Promise<void> | undefined;
 const downloadImage = async (
   urls: string[],
   { maxBytes = MAX_IMAGE_BYTES, timeoutMs = 15000, signal }: { maxBytes?: number; timeoutMs?: number; signal?: AbortSignal } = {},
@@ -409,6 +431,10 @@ const downloadImage = async (
   let matchError: StoredImageFailure["error"] | "" = "";
   for (const url of urls) {
     if (!/^https?:/i.test(url)) continue;
+    if (isPlatformImageUrl(url)) {
+      platformImageRulesReady ??= configurePlatformImageRequests().catch(() => undefined);
+      await platformImageRulesReady;
+    }
     for (const credentials of ["omit", "include"] as const) {
       if (signal?.aborted) return { error: "unreadable" };
       try {
@@ -556,13 +582,12 @@ const openZhihuPermissionWindow = async (tabId: number | null) => {
   await focusExtensionWindow("zhihu-save.html", ZHIHU_WINDOW_KEY, 560);
 };
 
-let pendingCapture: ((page: unknown) => void) | null = null;
+let pendingCapture: { requestId: string; resolve: (page: unknown) => void } | null = null;
 const pendingImageReads = new Map<string, (result: unknown) => void>();
 const pendingTweetReads = new Map<string, (result: unknown) => void>();
 const pendingGithubReads = new Map<string, (result: unknown) => void>();
 const pendingPlatformReads = new Map<string, {
   tabId: number;
-  sourceUrl: string;
   resolve: (result: unknown) => void;
 }>();
 const pendingXhsReads = new Map<string, (result: unknown) => void>();
@@ -1188,6 +1213,7 @@ const isGithubRepoSource = (value: unknown): value is GithubRepoPageSource => {
   const strings = (items: unknown): items is string[] =>
     Array.isArray(items) && items.every((item) => typeof item === "string");
   return typeof record.pageUrl === "string"
+    && (record.repositoryNwo === undefined || typeof record.repositoryNwo === "string")
     && typeof record.openGraphDescription === "string"
     && strings(record.embeddedJsonChunks)
     && typeof record.aboutText === "string"
@@ -1297,14 +1323,21 @@ const describePlatformError = (error: unknown) => {
   return describeGithubError(error);
 };
 
-const readPlatformFromPage = async (tabId: number, target: PlatformTarget, selectionFirst: boolean, sourceUrl: string) => {
+const isJikeWebFeed = (url: string) => url.startsWith("https://web.okjike.com/") && !platformTarget(url);
+const usesJikeWebState = (url: string) => isJikeWebFeed(url)
+  || /^https:\/\/web\.okjike\.com\/u\/[^/]+\/post\/[a-f0-9]{24}\/?(?:[?#]|$)/.test(url);
+const readJikeWebState = async (tabId: number, id?: string) => (await chrome.scripting.executeScript({
+  target: { tabId, frameIds: [0] }, world: "MAIN", func: readJikeWebStateInPage, args: id ? [id] : [],
+}))[0]?.result;
+
+const readPlatformFromPage = async (tabId: number, target: PlatformTarget, selectionFirst: boolean, sourceUrl: string, selectionText?: string) => {
   const requestId = crypto.randomUUID();
   return new Promise<unknown>((resolve, reject) => {
     const timeout = setTimeout(() => {
       pendingPlatformReads.delete(requestId);
       reject(new Error(t("captureTimeout")));
     }, 10_000);
-    pendingPlatformReads.set(requestId, { tabId, sourceUrl, resolve: (result) => {
+    pendingPlatformReads.set(requestId, { tabId, resolve: (result) => {
       clearTimeout(timeout);
       pendingPlatformReads.delete(requestId);
       resolve(result);
@@ -1313,12 +1346,13 @@ const readPlatformFromPage = async (tabId: number, target: PlatformTarget, selec
       const xiaoyuzhouState = target.platform === "xiaoyuzhou"
         ? (await chrome.scripting.executeScript({ target: { tabId, frameIds: [0] }, world: "MAIN", func: readXiaoyuzhouStateInPage }))[0]?.result
         : undefined;
+      const jikeState = target.platform === "jike" && usesJikeWebState(sourceUrl) ? await readJikeWebState(tabId,target.id) : undefined;
       await chrome.scripting.executeScript({
         target: { tabId, frameIds: [0] },
         func: (payload: unknown) => {
           (globalThis as { __edgeeverPlatformClipPayload?: unknown }).__edgeeverPlatformClipPayload = payload;
         },
-        args: [{ requestId, url: target.url, sourceUrl, selectionFirst, xiaoyuzhouState }],
+        args: [{ requestId, url: target.url, sourceUrl, selectionFirst, selectionText, xiaoyuzhouState, jikeState }],
       });
       await chrome.scripting.executeScript({ target: { tabId, frameIds: [0] }, files: ["assets/capture-platform.js"] });
     };
@@ -1330,11 +1364,11 @@ const readPlatformFromPage = async (tabId: number, target: PlatformTarget, selec
   });
 };
 
-const performPlatformSave = async (tabId: number, pageUrl: string, selectionFirst: boolean, selectedUrl = pageUrl) => {
+const performPlatformSave = async (tabId: number, pageUrl: string, selectionFirst: boolean, selectedUrl = pageUrl, selectionText?: string) => {
   const target = platformTarget(selectedUrl);
   if (!target) throw new Error(t("platformNotDetail"));
   const settings = await ensureClipperReady();
-  const result = await readPlatformFromPage(tabId, target, selectionFirst, pageUrl);
+  const result = await readPlatformFromPage(tabId, target, selectionFirst, pageUrl, selectionText);
   if (!result || typeof result !== "object") throw new Error(t("platformUnreadable"));
   const record = result as { ok?: unknown; reason?: unknown; clip?: unknown; selection?: unknown };
   if (record.ok !== true) {
@@ -1349,13 +1383,17 @@ const performPlatformSave = async (tabId: number, pageUrl: string, selectionFirs
   const capturedAt = clipDateTimeText(new Date().toISOString());
   const contentMarkdown = clip ? [
     `# ${markdownText(clip.title)}`,
-    clip.author ? `${t("platformAuthorLabel")}: ${markdownText(clip.author)}` : "",
+    clip.author ? `${t("platformAuthorLabel")}: ${[clip.author, clip.authorHeadline].filter(Boolean).map(value => markdownText(value!)).join(" · ")}` : "",
     clip.publishedAt ? `${t("platformPublishedAtLabel")}: ${markdownText(publishedTimeText(clip.publishedAt, t("platformRelativeTimeLabel")))}` : "",
     `${t("sourceLabel")}: [${markdownText(clip.url)}](${markdownUrl(clip.url)})`,
     `${t("capturedAtLabel")}: ${capturedAt}`,
     "---", clip.markdown,
   ].filter(Boolean).join("\n\n") : toMarkdown(selection!);
   const notebookId = await notebookForClip(settings);
+  if (target.platform === "jike" && usesJikeWebState(pageUrl) && clip) {
+    const live = await readJikeWebState(tabId,target.id);
+    if (live?.pageUrl !== pageUrl || live.post.id !== target.id) throw new Error(t("platformPageChanged"));
+  }
   // Notebook lookup and capture can both outlive a navigation. Bind the save
   // to the detail page the user clicked, not the next active tab or episode.
   const current = await chrome.tabs.get(tabId);
@@ -1365,8 +1403,7 @@ const performPlatformSave = async (tabId: number, pageUrl: string, selectionFirs
     body: JSON.stringify({ notebookId, title: (clip?.title || selection!.title).slice(0, 120), contentMarkdown, tags: clip?.tags || ["web-clip"] }),
   });
   const images = await embedClipImages(settings, created.memo, contentMarkdown, target.url, tabId, 0);
-  const message = images.embedded < images.total ? t("platformImagesPartial")
-    : images.total > 0 ? t("platformSavedWithImages") : t("savedToEdgeEver");
+  const message = clipImageFeedback(images);
   return { ok: true, message: clip?.completeness === "no-shownotes" ? `${message} ${t("platformNoShowNotes")}` : message };
 };
 
@@ -1374,19 +1411,24 @@ const savePlatformFromMenu = async (info: { pageUrl?: string; frameId?: number }
   const tabId = typeof tab?.id === "number" ? tab.id : null;
   try {
     if (tabId === null || (info.frameId ?? 0) !== 0) throw new Error(t("platformNotDetail"));
-    await showFeedback(tabId, 0, t("savingPlatformClip"), "normal");
     const pageUrl = info.pageUrl || tab?.url || "";
     let selectedUrl = pageUrl;
     if (socialPlatform(pageUrl)) {
-      const located = (await chrome.scripting.executeScript({ target: { tabId, frameIds: [0] }, func: () =>
-        document.querySelector("[data-edgeever-social-target]")?.getAttribute("data-edgeever-social-target") || ""
-      }))[0]?.result;
-      if (typeof located === "string" && platformTarget(located)?.platform === socialPlatform(pageUrl)) selectedUrl = located;
+      if (isJikeWebFeed(pageUrl)) {
+        const state = await readJikeWebState(tabId);
+        if (state?.pageUrl === pageUrl) selectedUrl = `https://m.okjike.com/originalPosts/${state.post.id}`;
+      } else {
+        const located = (await chrome.scripting.executeScript({ target: { tabId, frameIds: [0] }, func: () =>
+          document.querySelector("[data-edgeever-social-target]")?.getAttribute("data-edgeever-social-target") || ""
+        }))[0]?.result;
+        if (typeof located === "string" && platformTarget(located)?.platform === socialPlatform(pageUrl)) selectedUrl = located;
+      }
       if (!platformTarget(selectedUrl)) {
         await chrome.scripting.executeScript({target:{tabId,frameIds:[0]},files:["assets/social-target.js"]});
-        throw new Error(t("socialSelectPost"));
+        throw new Error(t(socialPlatform(pageUrl) === "douban" ? "doubanSelectComment" : "socialSelectPost"));
       }
     }
+    await showFeedback(tabId, 0, t("savingPlatformClip"), "normal");
     const result = await enqueueClip(() => performPlatformSave(tabId, pageUrl, false, selectedUrl));
     await showFeedback(tabId, 0, result.message, "success");
   } catch (error) {
@@ -1401,19 +1443,23 @@ const isCapturedPage = (value: unknown): value is CapturedPage => {
   const record = value as Partial<CapturedPage>;
   return typeof record.title === "string"
     && typeof record.url === "string"
-    && typeof record.markdown === "string";
+    && typeof record.markdown === "string"
+    && (record.platform === undefined || record.platform === "medium" || record.platform === "substack")
+    && (record.author === undefined || typeof record.author === "string")
+    && (record.publishedAt === undefined || (!!record.publishedAt && typeof record.publishedAt.value === "string" && ["datetime","date","relative"].includes(record.publishedAt.precision)));
 };
 
-const readCapturedPage = async (tabId: number, frameId: number | null, mode: "page" | "selection") => {
+const readCapturedPage = async (tabId: number, frameId: number | null, mode: "page" | "selection", selectionText?: string) => {
+  const requestId = crypto.randomUUID();
   const result = await new Promise<unknown>((resolve, reject) => {
     const timeout = setTimeout(() => {
-      pendingCapture = null;
+      if (pendingCapture?.requestId === requestId) pendingCapture = null;
       reject(new Error(t("captureTimeout")));
     }, 15_000);
-    pendingCapture = (page) => {
+    pendingCapture = { requestId, resolve: (page) => {
       clearTimeout(timeout);
       resolve(page);
-    };
+    } };
     const target = scriptTarget(tabId, frameId);
     const inject = async () => {
       await chrome.scripting.executeScript({
@@ -1421,7 +1467,7 @@ const readCapturedPage = async (tabId: number, frameId: number | null, mode: "pa
         func: (value: unknown) => {
           (globalThis as { __edgeeverPageClipPayload?: unknown }).__edgeeverPageClipPayload = value;
         },
-        args: [{ mode }],
+        args: [{ mode, requestId, selectionText }],
       });
       await chrome.scripting.executeScript({
         target,
@@ -1430,11 +1476,12 @@ const readCapturedPage = async (tabId: number, frameId: number | null, mode: "pa
     };
     void inject().catch((error: unknown) => {
       clearTimeout(timeout);
-      pendingCapture = null;
+      if (pendingCapture?.requestId === requestId) pendingCapture = null;
       reject(new Error(describeCaptureError(error)));
     });
   });
   if (result && typeof result === "object" && "error" in result && result.error === "unreadable") throw new Error(t("platformUnreadable"));
+  if (result && typeof result === "object" && "error" in result && result.error === "restricted") throw new Error(t("pageCaptureRestrictedHint"));
   if (!isCapturedPage(result)) throw new Error(t("captureScriptFailed", t("captureUnknownError")));
   return result;
 };
@@ -1457,29 +1504,38 @@ const describeSelectionError = (error: unknown) => {
 };
 
 const saveSelectionFromMenu = async (
-  info: { pageUrl?: string; frameId?: number; selectionText?: string },
+  info: { pageUrl?: string; frameUrl?: string; frameId?: number; selectionText?: string },
   tab?: { id?: number; url?: string; title?: string },
 ) => {
   const tabId = typeof tab?.id === "number" ? tab.id : null;
   const frameId = typeof info.frameId === "number" ? info.frameId : null;
   const pageUrl = tab?.url || info.pageUrl || "";
+  const frameUrl = frameId && frameId > 0 ? info.frameUrl : pageUrl;
   const pageTitle = tab?.title || "";
   const browserSelection = (info.selectionText || "").replace(/\u00a0/g, " ").trim();
   try {
     const settings = await ensureClipperReady();
     if (!tabId) throw new Error(t("selectionEmpty"));
+    const checkPage = async () => {
+      if (pageUrl && (await chrome.tabs.get(tabId)).url !== pageUrl) throw new Error(t("platformPageChanged"));
+    };
+    await checkPage();
     await showFeedback(tabId, frameId, t("savingSelection"), "normal");
+
     let captured: CapturedPage | null = null;
     try {
-      captured = await readCapturedPage(tabId, frameId, "selection");
+      captured = await readCapturedPage(tabId, frameId, "selection", browserSelection || undefined);
     } catch (error) {
       if (!browserSelection) throw error;
     }
-    const fromSelection = captured?.kind === "selection" ? captured : null;
-    const markdown = fromSelection?.markdown.trim() || browserSelection;
+    await checkPage();
+    if (captured && frameUrl && captured.url !== frameUrl) throw new Error(t("platformPageChanged"));
+    const fromSelection = captured?.kind === "selection"
+      && (!browserSelection || captured.plainText?.replace(/\u00a0/g, " ").trim() === browserSelection) ? captured : null;
+    const markdown = fromSelection?.markdown.trim() || selectionTextMarkdown(browserSelection);
     const plain = fromSelection?.plainText?.trim() || browserSelection || markdown;
     if (!markdown.trim()) throw new Error(t("selectionEmpty"));
-    const sourceUrl = fromSelection?.url || pageUrl;
+    const sourceUrl = fromSelection?.url || frameUrl || pageUrl;
     const contentMarkdown = selectionNoteMarkdown({
       markdown,
       pageUrl: sourceUrl,
@@ -1487,17 +1543,19 @@ const saveSelectionFromMenu = async (
       sourceLabel: t("sourceLabel"),
       capturedAtLabel: t("capturedAtLabel"),
     });
+    const notebookId = await notebookForClip(settings);
+    await checkPage();
     const created = await edgeEverRequest<{ memo?: CreatedClipMemo }>(settings, "/api/v1/memos", {
       method: "POST",
       body: JSON.stringify({
-        notebookId: await notebookForClip(settings),
+        notebookId,
         title: selectionNoteTitle(plain, pageTitle, t("selectionNoteFallbackTitle")),
         contentMarkdown,
         tags: ["web-clip"],
       }),
     });
-    await embedClipImages(settings, created.memo, contentMarkdown, sourceUrl, tabId, frameId);
-    await showFeedback(tabId, frameId, t("selectionSaved"), "success");
+    const images=await embedClipImages(settings, created.memo, contentMarkdown, sourceUrl, tabId, frameId);
+    await showFeedback(tabId, frameId, images.total ? clipImageFeedback(images) : t("selectionSaved"), "success");
   } catch (error) {
     const message = describeSelectionError(error);
     if (message === t("completePluginConfiguration") || message === t("instancePermissionRequired")) {
@@ -1634,6 +1692,7 @@ const saveVideoFromMenu = async (
 };
 
 const registerClipMenus = () => {
+  if (!chrome.contextMenus) return;
   // Chrome and Firefox fold an extension into a submenu when more than one of
   // its items is visible. These contexts stay disjoint so each command remains
   // on the top-level menu: a photo saves the image, selected words save the
@@ -1739,7 +1798,7 @@ const createClipMenus = () => {
 
 chrome.runtime.onInstalled.addListener(registerClipMenus);
 
-chrome.contextMenus.onClicked.addListener((info: { menuItemId?: string | number; srcUrl?: string; pageUrl?: string; linkUrl?: string; frameId?: number; selectionText?: string }, tab?: { id?: number; url?: string; title?: string }) => {
+chrome.contextMenus?.onClicked.addListener((info: { menuItemId?: string | number; srcUrl?: string; pageUrl?: string; frameUrl?: string; linkUrl?: string; frameId?: number; selectionText?: string }, tab?: { id?: number; url?: string; title?: string }) => {
   if (PLATFORM_MENUS.some((menu) => menu.id === info.menuItemId)) {
     void savePlatformFromMenu(info, tab);
     return;
@@ -1777,7 +1836,7 @@ chrome.contextMenus.onClicked.addListener((info: { menuItemId?: string | number;
   }
 });
 
-chrome.windows.onRemoved.addListener((windowId: number) => {
+chrome.windows?.onRemoved.addListener((windowId: number) => {
   void chrome.storage.session.get([IMAGE_SAVE_WINDOW_KEY, TWEET_WINDOW_KEY, XHS_WINDOW_KEY, ZHIHU_WINDOW_KEY]).then((stored: Record<string, unknown>) => {
     if (stored[IMAGE_SAVE_WINDOW_KEY] === windowId) {
       void chrome.storage.session.remove(IMAGE_SAVE_WINDOW_KEY);
@@ -1795,8 +1854,9 @@ chrome.windows.onRemoved.addListener((windowId: number) => {
 });
 
 const currentPageCaptureRoute = (pageUrl: string) => {
+  if (jikeLoginPost(pageUrl)) return {kind:'login-required',platform:t('platformJike'),access:'login-required'};
   const platform = platformTarget(pageUrl);
-  if (platform) return { kind:'platform', platform:({ 'hacker-news':'Hacker News', v2ex:'V2EX', xiaoyuzhou:t('platformXiaoyuzhou'), facebook:'Facebook', instagram:'Instagram', linkedin:'LinkedIn', threads:'Threads', bluesky:'Bluesky', 'substack-note':'Substack' })[platform.platform] };
+  if (platform) return { kind:'platform', platform:({ 'hacker-news':'Hacker News', v2ex:'V2EX', xiaoyuzhou:t('platformXiaoyuzhou'), boss:t('platformBoss'), xueqiu:t('platformXueqiu'), wechat:t('platformWechat'), jike:t('platformJike'), sspai:t('platformSspai'), juejin:t('platformJuejin'), douban:t('platformDouban'), facebook:'Facebook', instagram:'Instagram', linkedin:'LinkedIn', threads:'Threads', bluesky:'Bluesky', 'substack-note':'Substack' })[platform.platform] };
   if (socialPlatform(pageUrl)) return { kind:'social-feed' };
   if (youtubeTargetFromUrl(pageUrl)) return { kind:'video',platform:'YouTube' };
   if (bilibiliTargetFromUrl(pageUrl)) return { kind:'video',platform:'Bilibili' };
@@ -1810,10 +1870,28 @@ chrome.runtime.onMessage.addListener((message: { type?: string; page?: unknown; 
     void (async()=>{
       const [tab]=await chrome.tabs.query({active:true,currentWindow:true});
       const route=currentPageCaptureRoute(tab?.url || '');
+      if (tab?.id && platformTarget(tab.url || '')?.platform === 'boss') {
+        try {
+          const [read] = await chrome.scripting.executeScript({ target: { tabId: tab.id, frameIds: [0] }, func: bossLoginRequired });
+          if ((await chrome.tabs.get(tab.id)).url !== tab.url || typeof read?.result !== 'boolean') {
+            sendResponse({kind:'unknown'}); return;
+          }
+          sendResponse(read.result ? {...route,access:'login-required'} : route); return;
+        } catch { sendResponse({kind:'unknown'}); return; }
+      }
       if (route.kind === 'page' && tab?.id) {
         try {
           const [read]=await chrome.scripting.executeScript({target:{tabId:tab.id,frameIds:[0]},func:articlePlatform});
-          if (read?.result) { sendResponse({kind:'page',platform:read.result});return; }
+          if (read?.result) {
+            let restricted=false;
+            if (read.result === 'Substack') {
+              const [gate]=await chrome.scripting.executeScript({target:{tabId:tab.id,frameIds:[0]},func:substackPaywall});
+              if(typeof gate?.result !== 'boolean') {sendResponse({kind:'unknown'});return;}
+              restricted=gate.result;
+            }
+            if ((await chrome.tabs.get(tab.id)).url !== tab.url) {sendResponse({kind:'unknown'});return;}
+            sendResponse({kind:'page',platform:read.result,...(restricted ? {access:'content-restricted'} : {})});return;
+          }
         } catch { /* The URL still uses the generic page capture route. */ }
       }
       sendResponse(route);
@@ -1824,13 +1902,18 @@ chrome.runtime.onMessage.addListener((message: { type?: string; page?: unknown; 
     const pending = pendingPlatformReads.get(message.requestId);
     const sender = _sender as { id?: string; tab?: { id?: number }; frameId?: number; url?: string } | undefined;
     if (pending && sender && sender.id === chrome.runtime.id && sender.tab?.id === pending.tabId && sender.frameId === 0) {
-      pending.resolve(sender.url === pending.sourceUrl ? message.result : { ok: false, reason: "changed" });
+      // sender.url can retain the original document URL after SPA navigation.
+      // The page reader checks its live URL; performPlatformSave checks the tab again before creation.
+      pending.resolve(message.result);
     }
     return false;
   }
   if (message.type === "capturedPage" && message.page) {
-    pendingCapture?.(message.page);
-    pendingCapture = null;
+    if (pendingCapture && pendingCapture.requestId === message.requestId) {
+      const pending = pendingCapture;
+      pendingCapture = null;
+      pending.resolve(message.page);
+    }
     return false;
   }
 
@@ -1979,58 +2062,86 @@ chrome.runtime.onMessage.addListener((message: { type?: string; page?: unknown; 
           throw new Error(t("currentPageNotFound"));
         }
 
+        const tabId = tab.id;
         const pageUrl = tab.url || "";
         const route = currentPageCaptureRoute(pageUrl);
-        if (route.kind === 'platform') {
+        // Read the selection before queueing. Later edits to the source page
+        // must not change this click from whole-page to selection or A to B.
+        let selectionText: string | undefined;
+        if (["platform", "page", "social-feed", "login-required"].includes(route.kind)) {
           try {
-            sendResponse(await enqueueClip(() => performPlatformSave(tab.id, pageUrl, true)));
+            const [read] = await chrome.scripting.executeScript({target:{tabId,frameIds:[0]},func:()=>({url:location.href,text:window.getSelection()?.toString().replace(/\u00a0/g," ").trim() || ""})});
+            if (read?.result?.url !== pageUrl) throw new Error(t("platformPageChanged"));
+            selectionText = read.result.text;
           } catch (error) {
-            sendResponse({ ok: false, message: describePlatformError(error) });
+            if (error instanceof Error && error.message === t("platformPageChanged")) throw error;
+            throw new Error(describeCaptureError(error));
           }
-          return;
         }
-        if (route.kind === 'social-feed') {
-          // Feed capture requires an explicit card. A text selection still uses
-          // the normal selected-text path further below.
-          const selection = (await chrome.scripting.executeScript({target:{tabId:tab.id,frameIds:[0]},func:()=>window.getSelection()?.toString().trim() || ""}))[0]?.result;
-          if (!selection) { sendResponse({ok:false,message:t("socialSelectPost")}); return; }
-        }
-        if (route.kind === 'video') {
-          const result = await enqueueClip(() => performVideoSave(settings, tab.id, null, pageUrl));
-          sendResponse(result.created ? { ok: true, message: result.message } : { ok: false, message: result.message });
-          return;
-        }
+        await enqueueClip(async () => {
+          if ((await chrome.tabs.get(tabId)).url !== pageUrl) throw new Error(t("platformPageChanged"));
+          if (route.kind === 'login-required' || route.kind === 'social-feed') {
+            try {
+              const emptyMessage = route.kind === 'login-required' ? t('platformUnreadable')
+                : t(socialPlatform(pageUrl) === "douban" ? "doubanSelectComment" : "socialSelectPost");
+              const selection = selectionText;
+              if (!selection) {sendResponse({ok:false,message:emptyMessage});return;}
+              const page = await readCapturedPage(tabId, null, "selection", selectionText);
+              if (page.url !== pageUrl) throw new Error(t("platformPageChanged"));
+              if (page.kind !== "selection" || !page.markdown.trim()) {sendResponse({ok:false,message:emptyMessage});return;}
+              const images=await createMemo(settings, page, tabId, pageUrl);
+              sendResponse({ok:true,message:clipImageFeedback(images)});
+            } catch (error) {
+              sendResponse({ok:false,message:describePlatformError(error)});
+            }
+            return;
+          }
+          if (route.kind === 'platform') {
+            try {
+              sendResponse(await performPlatformSave(tabId, pageUrl, true, pageUrl, selectionText));
+            } catch (error) {
+              sendResponse({ ok: false, message: describePlatformError(error) });
+            }
+            return;
+          }
+          if (route.kind === 'video') {
+            const result = await performVideoSave(settings, tabId, null, pageUrl);
+            sendResponse(result.created ? { ok: true, message: result.message } : { ok: false, message: result.message });
+            return;
+          }
 
-        if (route.kind === 'github') {
-          let facts: GithubRepoFacts | null = null;
-          try {
-            facts = await readGithubRepoFromPage(tab.id, null);
-          } catch {
-            // The repository card is unavailable. Save the page as an article.
+          if (route.kind === 'github') {
+            let facts: GithubRepoFacts | null = null;
+            try {
+              facts = await readGithubRepoFromPage(tabId, null);
+            } catch {
+              // The repository card is unavailable. Save the page as an article.
+            }
+            if (facts) {
+              await createGithubRepoMemo(settings, facts);
+              sendResponse({ ok: true });
+              return;
+            }
           }
-          if (facts) {
-            await createGithubRepoMemo(settings, facts);
+
+          if (route.kind === 'zhihu') {
+            const located = await readZhihuLocate(tabId, null);
+            if (!located.ok) throw new Error(t("zhihuNotFound"));
+            await saveLocatedZhihu(settings, tabId, null, located);
             sendResponse({ ok: true });
             return;
           }
-        }
 
-        if (route.kind === 'zhihu') {
-          const located = await readZhihuLocate(tab.id, null);
-          if (!located.ok) throw new Error(t("zhihuNotFound"));
-          await saveLocatedZhihu(settings, tab.id, null, located);
-          sendResponse({ ok: true });
-          return;
-        }
-
-        const page = await readCapturedPage(tab.id, null, "page");
-        await createMemo(settings, page, tab.id);
-        sendResponse({ ok: true });
+          const page = await readCapturedPage(tabId, null, "page", selectionText);
+          if (page.url !== pageUrl) throw new Error(t("platformPageChanged"));
+          const images = await createMemo(settings, page, tabId, pageUrl);
+          sendResponse({ ok: true, message: clipImageFeedback(images) });
+        });
       } catch (error) {
         const message = error instanceof Error ? error.message : "";
         sendResponse({
           ok: false,
-          message: message === t("zhihuNotFound") || message === t("zhihuUnreadable")
+          message: message === t("zhihuNotFound") || message === t("zhihuUnreadable") || message === t("pageAccessDenied") || message === t("platformPageChanged") || message === t("pageCaptureRestrictedHint")
             ? message
             : message === t("captureTimeout") || message.startsWith(t("captureScriptFailed", ""))
               ? describeCaptureError(error)

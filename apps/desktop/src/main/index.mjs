@@ -35,6 +35,7 @@ import { showWindow } from "./window-visibility.mjs";
 import { globalShortcutAccelerator, normalizeGlobalShortcutBinding, replaceGlobalShortcut, toggleMainWindow } from "./global-shortcut.mjs";
 import { trayIconPath } from "./tray-icon.mjs";
 import { writeImageClipboard, writeRichClipboard, writeTextClipboard } from "./clipboard-write.mjs";
+import { registerClipboardReadIpc } from "./clipboard-read.mjs";
 import { captureScreenToNote, createScreenshotCaptureGuard, screenshotImportIpcPayload, writeScreenshotTempPath } from "./screenshot-capture.mjs";
 import { LocalDataResetError, scheduleMacLocalDataReset } from "./local-data-reset.mjs";
 import { buildDesktopDiagnosticIssueUrl, normalizeDesktopDiagnostic } from "./desktop-diagnostics.mjs";
@@ -55,7 +56,7 @@ import { normalizeUpdateProgress } from "./update-progress.mjs";
 import { inspectWindowsTaskbarShortcuts } from "./windows-taskbar-diagnostics.mjs";
 import { testPicGoConnection, createPicGoUploadQueue } from "./picgo.mjs";
 import { createPluginPublicNetworkRuntime } from "./plugin-public-network.mjs";
-import { createAiDirectRuntime } from "./ai-direct.mjs";
+import { canUseAiProviderUrl, createAiDirectRuntime } from "./ai-direct.mjs";
 import { createAcpPathStore, validateTrustedAcpPath } from "./acp-path-store.mjs";
 import { createAcpHostRuntime, registerAcpIpc } from "./acp-host.mjs";
 import { shouldQuitAfterAllWindowsClosed } from "./window-lifecycle.mjs";
@@ -1479,6 +1480,10 @@ const attachEditContextMenu = (contents) => {
   });
 };
 
+const desktopRendererEntryUrl = () => app.isPackaged && !process.env.EDGE_EVER_DESKTOP_WEB_URL
+  ? (usePrivateAppProtocol ? DESKTOP_APP_ENTRY_URL : pathToFileURL(join(process.resourcesPath, "web/index.html")).href)
+  : webUrl;
+
 const createWindow = async () => {
   const state = await readWindowState();
   mainWindow = new BrowserWindow({
@@ -1568,9 +1573,7 @@ const createWindow = async () => {
     void writeDiagnostic("renderer.responsive");
   });
 
-  const rendererEntryUrl = app.isPackaged && !process.env.EDGE_EVER_DESKTOP_WEB_URL
-    ? (usePrivateAppProtocol ? DESKTOP_APP_ENTRY_URL : pathToFileURL(join(process.resourcesPath, "web/index.html")).href)
-    : webUrl;
+  const rendererEntryUrl = desktopRendererEntryUrl();
   const guardNavigation = (event, url) => {
     if (isAllowedAppNavigation(url, rendererEntryUrl)) return;
     event.preventDefault();
@@ -1767,6 +1770,11 @@ const startApplication = async () => {
   ipcMain.handle("desktop:copy-text", (_event, value) => writeTextClipboard(clipboard, value));
   ipcMain.handle("desktop:copy-html", (_event, input) => writeRichClipboard(clipboard, ClipboardItem, input));
   ipcMain.handle("desktop:copy-image", (_event, bytes) => writeImageClipboard(clipboard, ClipboardItem, bytes));
+  registerClipboardReadIpc(ipcMain, {
+    clipboard,
+    getMainWindow: () => mainWindow,
+    getRendererUrl: desktopRendererEntryUrl,
+  });
   ipcMain.handle("desktop:set-session-token", async (event, value) => {
     if (event.sender !== mainWindow?.webContents || event.senderFrame !== event.sender.mainFrame || instanceChangePending) throw new Error("Session update forbidden");
     await saveDesktopSessionToken(value);
@@ -1806,6 +1814,10 @@ const startApplication = async () => {
   ipcMain.on("desktop:cancel-public-network-fetch", (event, requestId) => {
     if (event.sender === mainWindow?.webContents && typeof requestId === "string") pluginPublicNetwork.cancel(requestId);
   });
+  ipcMain.handle("desktop:ai-direct-check", async (event, url) => {
+    if (event.sender !== mainWindow?.webContents) throw new Error("AI provider requests must come from the main window");
+    return canUseAiProviderUrl(url);
+  });
   ipcMain.handle("desktop:ai-direct-open", async (event, requestId, input) => {
     if (event.sender !== mainWindow?.webContents) throw new Error("AI provider requests must come from the main window");
     const sender = event.sender;
@@ -1832,7 +1844,10 @@ const startApplication = async () => {
   });
   const acpRuntime = registerAcpIpc(ipcMain, createAcpHostRuntime({
     adapterStore: join(app.getPath("userData"), "acp-adapters"),
+    adapterFetchImpl: (url, init) => net.fetch(url, { ...init, credentials: "omit" }),
+    onUpdateDiagnostic: (details) => { void writeDiagnostic("acp.adapter-update-failed", details); },
     onDiagnostic: (details) => { void writeDiagnostic("acp.adapter-stderr", details); },
+    onProcessDiagnostic: ({ event, ...details }) => { void writeDiagnostic(`acp.adapter-${event}`, details); },
     mcpScriptPath: app.isPackaged
       ? join(process.resourcesPath, "mcp-bridge", "edgeever-mcp-stdio.mjs")
       : join(projectRoot, "scripts", "edgeever-mcp-stdio.mjs"),

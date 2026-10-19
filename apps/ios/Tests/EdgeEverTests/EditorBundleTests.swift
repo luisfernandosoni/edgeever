@@ -5,6 +5,161 @@ import WebKit
 /// Ensures the TipTap editor HTML is actually shipped in the app (not the plain-text fallback).
 final class EditorBundleTests: XCTestCase {
     @MainActor
+    func testFontPickerLoadsBundledPreviewAndReturnsSelection() async throws {
+        let url = try XCTUnwrap(NoteImageFontPickerWebView.packagedHTMLURL())
+        let ready = expectation(description: "font picker ready")
+        let selected = expectation(description: "font picker selection")
+        final class Loader: NSObject, WKScriptMessageHandler {
+            let ready: XCTestExpectation
+            let selected: XCTestExpectation
+            var selection: String?
+            init(_ ready: XCTestExpectation, _ selected: XCTestExpectation) {
+                self.ready = ready
+                self.selected = selected
+            }
+            func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+                guard let body = message.body as? [String: String] else { return }
+                if body["type"] == "ready" { ready.fulfill() }
+                if body["type"] == "select" { selection = body["id"]; selected.fulfill() }
+            }
+        }
+        let loader = Loader(ready, selected)
+        let config = WKWebViewConfiguration()
+        config.preferences.setValue(true, forKey: "allowFileAccessFromFileURLs")
+        config.userContentController.add(loader, name: "fontPicker")
+        config.userContentController.addUserScript(WKUserScript(source: """
+        window.EdgeEverFontPickerConfiguration = {
+          selected:'auto', theme:'code', dark:false, title:'Typography',
+          sample:'Capture a little inspiration', latinSample:'Capture a little inspiration',
+          loading:'Loading preview', unavailable:'Preview unavailable',
+          options:[{id:'auto',label:'Follow Theme'},{id:'sans',label:'Sans'},{id:'mono',label:'Mono'}]
+        };
+        """, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        defer { config.userContentController.removeScriptMessageHandler(forName: "fontPicker") }
+        let webView = WKWebView(frame: CGRect(x: 0, y: 0, width: 390, height: 844), configuration: config)
+        webView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
+        await fulfillment(of: [ready], timeout: 15)
+        var previewReady = false
+        for _ in 0..<100 {
+            previewReady = (try await webView.evaluateJavaScript(#"document.querySelector('[data-font=auto] .font-sample') !== null && document.fonts.check('20px "Geist Mono Variable"')"#)) as? Bool == true
+            if previewReady { break }
+            try await Task.sleep(nanoseconds: 100_000_000)
+        }
+        XCTAssertTrue(previewReady, "theme preview must load its actual bundled font without a network request")
+        let selectedID = try await webView.evaluateJavaScript("document.querySelector('[aria-checked=true]').dataset.font")
+        XCTAssertEqual(selectedID as? String, "auto")
+        _ = try await webView.evaluateJavaScript("document.querySelector('[data-font=sans]').click(); true")
+        await fulfillment(of: [selected], timeout: 5)
+        XCTAssertEqual(loader.selection, "sans")
+    }
+
+    @MainActor
+    func testSharedFallbackSurvivesEditorConfigurationAndReuse() async throws {
+        let url = try XCTUnwrap(TipTapWebView.Coordinator.packagedEditorHTMLURL())
+        let loaded = expectation(description: "editor bridge ready")
+        final class Loader: NSObject, WKScriptMessageHandler {
+            let loaded: XCTestExpectation
+            var changes: [[String: Any]] = []
+            init(_ loaded: XCTestExpectation) { self.loaded = loaded }
+            func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+                guard let body = message.body as? [String: Any] else { return }
+                if body["type"] as? String == "ready" { loaded.fulfill() }
+                if body["type"] as? String == "change" { changes.append(body) }
+            }
+        }
+        let loader = Loader(loaded)
+        let config = WKWebViewConfiguration()
+        config.userContentController.add(loader, name: "edgeever")
+        defer { config.userContentController.removeScriptMessageHandler(forName: "edgeever") }
+        let webView = WKWebView(frame: CGRect(x: 0, y: 0, width: 390, height: 844), configuration: config)
+        webView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
+        await fulfillment(of: [loaded], timeout: 30)
+
+        for path in ["first", "second"] {
+            // This used to emit the previous body (empty on first use) to native,
+            // replacing the share seed even though no user edit had occurred.
+            _ = try await webView.evaluateJavaScript("window.EdgeEverEditor.configure({mode:'editor',locale:'en-US',theme:'light'}); true")
+            try await Task.sleep(nanoseconds: 100_000_000)
+            XCTAssertTrue(loader.changes.isEmpty, "configuration must not overwrite the native share seed")
+
+            let source = try XCTUnwrap(URL(string: "https://x.com/example/status/\(path)"))
+            let draft = WebClipper.fallback(source)
+            let decision = TipTapContentSource.resolve(
+                mode: .editor, documentJSON: MemoEditViewModel.emptyDocJSON, markdown: draft.contentMarkdown
+            )
+            XCTAssertFalse(decision.useJSON)
+            let acknowledged = try await webView.evaluateJavaScript(
+                TipTapResourceLoader.jsCall(fn: "setMarkdown", arg: decision.payload)
+            )
+            XCTAssertEqual(acknowledged as? Bool, true)
+            let snapshot = try await webView.evaluateJavaScript("({markdown:window.EdgeEverEditor.getMarkdown(),json:window.EdgeEverEditor.getDocument(),href:document.querySelector('.ProseMirror a')?.getAttribute('href')})") as? [String: String]
+            XCTAssertTrue(snapshot?["markdown"]?.contains(source.absoluteString) == true)
+            XCTAssertTrue(snapshot?["json"]?.contains(source.absoluteString) == true)
+            XCTAssertEqual(snapshot?["href"], source.absoluteString)
+        }
+        try await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertTrue(loader.changes.isEmpty, "native content pushes must not act as user edits")
+    }
+
+    @MainActor
+    func testContentPushRequiresBridgeAcknowledgement() async throws {
+        let webView = WKWebView()
+        let script = TipTapResourceLoader.jsCall(fn: "setMarkdown", arg: "Source: https://example.com")
+        let missing = try await webView.evaluateJavaScript(script)
+        XCTAssertEqual(missing as? Bool, false)
+        _ = try await webView.evaluateJavaScript("window.EdgeEverEditor = {setMarkdown(){throw new Error('load failed')}}; true")
+        let failed = try await webView.evaluateJavaScript(script)
+        XCTAssertEqual(failed as? Bool, false)
+        _ = try await webView.evaluateJavaScript("window.EdgeEverEditor.setMarkdown = value => {window.receivedMarkdown = value}; true")
+        let succeeded = try await webView.evaluateJavaScript(script)
+        XCTAssertEqual(succeeded as? Bool, true)
+        let received = try await webView.evaluateJavaScript("window.receivedMarkdown")
+        XCTAssertEqual(received as? String, "Source: https://example.com")
+    }
+
+    @MainActor
+    func testFailedContentPushCannotReplaceShareWithEmptySnapshot() async throws {
+        let runtime = SharedTipTapRuntime.editor
+        let host = TipTapHostView()
+        runtime.attach(to: host)
+        defer {
+            runtime.webView.evaluateJavaScript("if(window.savedEditorAPI){window.EdgeEverEditor=window.savedEditorAPI;delete window.savedEditorAPI;window.EdgeEverEditor.configure({mode:'editor',locale:'en-US',theme:'light'})}", completionHandler: nil)
+            runtime.detach(from: host)
+        }
+        for _ in 0..<100 {
+            if (try? await runtime.webView.evaluateJavaScript("!!window.EdgeEverEditor")) as? Bool == true { break }
+            try await Task.sleep(nanoseconds: 100_000_000)
+        }
+        _ = try await runtime.webView.evaluateJavaScript("""
+        window.savedEditorAPI = window.EdgeEverEditor;
+        window.EdgeEverEditor = {
+          configure(){},
+          setMarkdown(){throw new Error('content push failed')},
+          getMarkdown(){return ''},
+          getDocument(){return '{"type":"doc","content":[{"type":"paragraph"}]}'},
+          focusEnd(){}
+        }; true
+        """)
+        var readyCount = 0
+        var changeCount = 0
+        runtime.bind(TipTapSession(
+            mode: .editor,
+            documentJSON: MemoEditViewModel.emptyDocJSON,
+            markdown: "Source: https://example.com/shared",
+            baseURL: nil, token: nil, locale: "en-US", theme: "light", placeholder: "",
+            onChange: { _, _ in changeCount += 1 },
+            onBodyReady: { readyCount += 1 }
+        ))
+        try await Task.sleep(nanoseconds: 100_000_000)
+        _ = try await runtime.webView.evaluateJavaScript("window.webkit.messageHandlers.edgeever.postMessage({type:'change',contentMarkdown:'',contentJson:'{\"type\":\"doc\",\"content\":[]}'}); true")
+        try await Task.sleep(nanoseconds: 100_000_000)
+        let snapshot = await runtime.snapshotContent()
+        XCTAssertNil(snapshot, "failed initialization must leave the native share body intact")
+        XCTAssertEqual(readyCount, 0)
+        XCTAssertEqual(changeCount, 0)
+    }
+
+    @MainActor
     func testNativeImageBatchCreatesAnEditableGallery() async throws {
         let url = try XCTUnwrap(TipTapWebView.Coordinator.packagedEditorHTMLURL())
         let loaded = expectation(description: "editor bridge ready")

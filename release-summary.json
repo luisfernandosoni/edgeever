@@ -1,23 +1,35 @@
 {
-  "version": "1.118.0",
+  "version": "1.125.0",
   "changes": {
     "en-US": [
-      "Publish notebooks and their descendants as a browsable website with live content, directory navigation, and optional password protection.",
-      "Manage note and notebook shares more clearly, retry revocation, and view newly generated share passwords across devices. Regenerate older share passwords once to enable cross-device viewing; their existing access remains valid.",
-      "Preserve failed desktop share imports across restarts, restore WorkBuddy sign-in after connection failures, and clarify the current note context for local AI agents.",
-      "Use softer button colors and clearer inbox deletion guidance."
+      "Support SVG image uploads, previews, and sharing.",
+      "Improve AI poster template selection, speed up template thumbnails, and allow retrying failed previews.",
+      "Fix consecutive mobile shares being combined into one note and Android image export failures for filenames containing brackets.",
+      "Fix keyboard shortcut switching between source and rich-text editor modes. Thanks to @sivdead (#623).",
+      "Fix extra brackets and long links beside clipped Substack images and improve GitHub repository metadata capture. Update the clipper extension and re-clip Substack articles to apply the fix. Thanks to @sivdead (#618).",
+      "Fix desktop access to AI models on the server local network by routing models restricted from direct access through the instance server. Thanks to @sivdead (#624).",
+      "Keep note context menus within the window boundaries.",
+      "Fix Markdown line breaks in untouched initial welcome notes."
     ],
     "zh-CN": [
-      "支持将笔记本及全部子笔记本发布为公开网站，提供目录导航、内容同步和可选密码保护。",
-      "优化笔记与笔记本的分享管理、状态提示和撤销重试，并支持跨设备查看新生成的分享密码。旧分享密码仍可访问，需重新生成一次才能跨设备查看。",
-      "桌面端导入失败的分享内容可在重启后保留，修复 WorkBuddy 连接失败后的登录入口，并明确本地 AI 工具的当前笔记上下文。",
-      "优化按钮配色与收件箱删除提示。"
+      "支持 SVG 图片上传、预览和分享。",
+      "改进 AI 海报模板选择，加快模板缩略图加载，并支持加载失败后重试。",
+      "修复移动端连续分享混入同一笔记的问题，以及 Android 图片导出文件名含方括号时的失败。",
+      "修复编辑器源码与富文本模式的快捷键往返切换。感谢 @sivdead（#623）。",
+      "修复 Substack 剪藏图片旁多余括号和长链接，以及 GitHub 仓库信息提取；Substack 修复需更新剪藏扩展后重新剪藏。感谢 @sivdead（#618）。",
+      "修复桌面端无法调用服务器局域网 AI 模型的问题，受直连限制的模型改由实例服务器调用。感谢 @sivdead（#624）。",
+      "修复笔记右键菜单超出窗口边界的问题。",
+      "修复未编辑的初始欢迎笔记中 Markdown 换行显示异常。"
     ],
     "ja": [
-      "ノートブックと配下の内容を、目次・更新反映・任意のパスワード保護付きの公開サイトとして共有できます。",
-      "共有管理・状態表示・取り消しの再試行を改善し、新しく生成した共有パスワードを端末間で確認できます。既存のパスワードは引き続き利用でき、再生成すると端末間で確認できます。",
-      "デスクトップで失敗した共有インポートを再起動後も保持し、接続失敗後の WorkBuddy ログインとローカル AI の現在のノートの認識を改善しました。",
-      "ボタンの配色と受信箱の削除案内を改善しました。"
+      "SVG 画像のアップロード、プレビュー、共有に対応しました。",
+      "AI によるポスターテンプレート選択を改善し、サムネイルの表示を高速化しました。読み込み失敗時に再試行できます。",
+      "モバイルで連続共有した内容が同じノートに混在する問題と、Android で角括弧を含む画像ファイル名の書き出し失敗を修正しました。",
+      "ソースとリッチテキスト間のショートカット切り替えを修正しました。@sivdead さんに感謝します（#623）。",
+      "Substack のクリップ画像横に余分な括弧と長いリンクが出る問題と、GitHub リポジトリ情報の取得を修正しました。Substack の修正には拡張機能の更新と再クリップが必要です。@sivdead さんに感謝します（#618）。",
+      "デスクトップからサーバーのローカルネットワーク上の AI モデルを利用できない問題を修正し、直接アクセスが制限されるモデルはインスタンスサーバー経由で呼び出します。@sivdead さんに感謝します（#624）。",
+      "ノートのコンテキストメニューがウィンドウの外にはみ出す問題を修正しました。",
+      "未編集の初期ウェルカムノートで Markdown の改行が正しく表示されない問題を修正しました。"
     ]
   }
 }

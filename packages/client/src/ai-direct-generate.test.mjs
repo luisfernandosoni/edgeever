@@ -91,6 +91,23 @@ describe("direct tag suggestions", () => {
 });
 
 describe("direct plugin AI", () => {
+  test("does not repeat native generation on the instance after a provider network failure", async () => {
+    const paths = [];
+    let providerRequests = 0;
+    const client = createEdgeEverClient({
+      baseUrl: "https://notes.example",
+      directAiGeneration: true,
+      fetch: async url => {
+        paths.push(new URL(String(url)).pathname);
+        return Response.json({ provider: "openai-compatible", baseUrl: "https://provider.example.com/v1", apiKey: "key", modelId: "model", system: "Translate", prompt: "hello", maxOutputTokens: 100 });
+      },
+      providerFetch: async () => { providerRequests++; throw new TypeError("NetworkError during provider request"); },
+    });
+    await expect(client.pluginAi.generate({ prompt: "hello", maxOutputTokens: 100 })).rejects.toThrow(/NetworkError/);
+    expect(paths).toEqual(["/api/v1/plugins/ai/generate/prepare"]);
+    expect(providerRequests).toBe(1);
+  });
+
   test("prepares then calls the model provider", async () => {
     const urls = [];
     const client = createEdgeEverClient({

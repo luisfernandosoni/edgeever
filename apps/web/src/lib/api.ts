@@ -4,7 +4,7 @@ import {
   type EdgeEverClientRequestContext,
 } from "@edgeever/client";
 import type { AuthSession } from "@edgeever/shared";
-import { normalizeInstanceUrl } from "@edgeever/shared";
+import { normalizeInstanceUrl } from "@edgeever/shared/public-demo";
 import { createClientUuid } from "./client-id";
 
 export { ApiRequestError };
@@ -328,6 +328,7 @@ const client = createEdgeEverClient({
   shouldAttachToken: (path) => path !== "/api/v1/auth/login",
   onUnauthorized: handleUnauthorized,
   directAiGeneration: desktopAiDirectEnabled,
+  canDirectAiGeneration: target => window.edgeeverDesktop?.canUseAiProviderUrl?.(target.baseUrl) ?? false,
   tryDirectAiGeneration: !desktopAiDirectEnabled,
   providerFetch: desktopAiDirectEnabled ? desktopProviderFetch : undefined,
 });
@@ -350,7 +351,7 @@ export const api = {
     return session;
   },
 
-  login: async (payload: { username: string; password: string }) => {
+  login: async (payload: { username: string; password: string; locale?: string }) => {
     const session = await client.login({ ...payload, deviceId: getOrCreateClientDeviceId() });
     desktopSessionRejected = false;
     return session;

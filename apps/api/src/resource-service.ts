@@ -1,7 +1,8 @@
-import type {
-  Resource,
-  ResourceListItem,
-  ResourceStorageSummary,
+import {
+  SUPPORTED_IMAGE_MIME_TYPES,
+  type Resource,
+  type ResourceListItem,
+  type ResourceStorageSummary,
 } from "@edgeever/shared";
 import { auditStatement } from "./audit";
 import type { AppContext, AuditActor, Bindings } from "./api-context";
@@ -15,13 +16,7 @@ import type { DatabaseAdapter } from "./storage-contract";
 export const MAX_IMAGE_UPLOAD_BYTES = 100 * 1024 * 1024;
 export const MAX_ATTACHMENT_UPLOAD_BYTES = 1024 * 1024 * 1024;
 
-export const SUPPORTED_IMAGE_MIME_TYPES = new Set([
-  "image/png",
-  "image/jpeg",
-  "image/gif",
-  "image/webp",
-  "image/avif",
-]);
+export { SUPPORTED_IMAGE_MIME_TYPES } from "@edgeever/shared";
 
 export type ResourceRow = {
   id: string;
@@ -101,7 +96,7 @@ export const validateImageUpload = (mimeType: string, size: number) => {
   if (!SUPPORTED_IMAGE_MIME_TYPES.has(mimeType)) {
     throw new AppError(
       "unsupported_media_type",
-      "Only PNG, JPEG, GIF, WebP and AVIF images are supported.",
+      "Only PNG, JPEG, GIF, WebP, AVIF and SVG images are supported.",
       415,
     );
   }
@@ -129,11 +124,12 @@ export const validateAttachmentUpload = (size: number) => {
 export const normalizeFilename = (filename: string) => filename
   .trim()
   .replace(/[\\/]/g, "-")
+  // oxlint-disable-next-line no-control-regex -- strips control characters from resource filenames
   .replace(/[\u0000-\u001f\u007f]/g, "")
   .slice(0, 160);
 
 export const inferImageExtension = (filename: string, mimeType: string) => {
-  const extension = /\.(png|jpe?g|gif|webp|avif)$/i.exec(filename)?.[0]?.toLowerCase();
+  const extension = /\.(png|jpe?g|gif|webp|avif|svg)$/i.exec(filename)?.[0]?.toLowerCase();
   if (extension) return extension === ".jpeg" ? ".jpg" : extension;
 
   switch (mimeType) {
@@ -142,6 +138,7 @@ export const inferImageExtension = (filename: string, mimeType: string) => {
     case "image/gif": return ".gif";
     case "image/webp": return ".webp";
     case "image/avif": return ".avif";
+    case "image/svg+xml": return ".svg";
     default: return "";
   }
 };
@@ -246,6 +243,11 @@ type ResourceCreateInput = {
   bytes: Uint8Array;
   actor: AuditActor;
   metadata?: Record<string, unknown>;
+  /**
+   * The note's workspace. Required on routes without a signed-in user, such
+   * as public table forms; otherwise the caller's workspace is used.
+   */
+  workspaceId?: string;
 };
 
 const storeResource = async (
@@ -261,7 +263,7 @@ const storeResource = async (
 ) => {
   const resourceId = input.resourceId?.trim() || createId("res");
   const now = isoNow();
-  const workspaceId = getWorkspaceId(context);
+  const workspaceId = input.workspaceId ?? getWorkspaceId(context);
   const filename = normalizeFilename(input.filename) || `${resourceId}${input.objectKeyExtension ?? ""}`;
   const metadata = input.kind === "attachment"
     ? { ...input.metadata, originalFilename: filename }

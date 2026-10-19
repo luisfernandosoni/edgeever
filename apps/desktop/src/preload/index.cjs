@@ -40,12 +40,23 @@ contextBridge.exposeInMainWorld("edgeeverDesktop", Object.freeze({
   copyText: (value) => ipcRenderer.invoke("desktop:copy-text", value),
   copyHtml: (html, plainText) => ipcRenderer.invoke("desktop:copy-html", { html, plainText }),
   copyImage: (bytes) => ipcRenderer.invoke("desktop:copy-image", bytes),
+  readClipboard: () => {
+    // Check in the isolated preload world; renderer JavaScript cannot forge this
+    // gesture state. Clipboard reads are reserved for an explicit paste action.
+    if (!navigator.userActivation?.isActive) return Promise.reject(new Error("Clipboard read requires user activation"));
+    return ipcRenderer.invoke("desktop:read-clipboard").then((snapshot) => ({
+      html: snapshot.html,
+      text: snapshot.text,
+      images: snapshot.images.map(normalizeIpcBytes),
+    }));
+  },
   setSessionToken: (value) => ipcRenderer.invoke("desktop:set-session-token", value),
   clearSessionToken: () => ipcRenderer.invoke("desktop:clear-session-token"),
   testPicGoConnection: (endpoint) => ipcRenderer.invoke("desktop:picgo-test", endpoint),
   uploadPicGoImage: (input) => ipcRenderer.invoke("desktop:picgo-upload", input),
   publicNetworkFetch: (requestId, input) => ipcRenderer.invoke("desktop:public-network-fetch", requestId, input),
   cancelPublicNetworkFetch: async (requestId) => { ipcRenderer.send("desktop:cancel-public-network-fetch", requestId); },
+  canUseAiProviderUrl: url => ipcRenderer.invoke("desktop:ai-direct-check", url),
   openAiProviderStream: (requestId, input) => ipcRenderer.invoke("desktop:ai-direct-open", requestId, input),
   cancelAiProviderStream: (requestId) => { ipcRenderer.send("desktop:ai-direct-cancel", requestId); },
   onAiProviderStreamChunk: (callback) => {

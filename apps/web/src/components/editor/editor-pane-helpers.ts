@@ -9,7 +9,7 @@ import type { MemoUpdateSyncPayload } from "@/lib/local-db";
 import { getAttachmentLinkFromEventTarget } from "./attachment-resource-menu";
 import type { NoteLinkHintPosition } from "./EditorPaneChrome";
 
-export const SUPPORTED_PASTE_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"]);
+export { SUPPORTED_IMAGE_MIME_TYPES as SUPPORTED_PASTE_IMAGE_TYPES } from "@edgeever/shared";
 export const MOBILE_EDITOR_QUERY = "(max-width: 639px)";
 export const MOBILE_DRAFT_PERSIST_DELAY_MS = 800;
 
@@ -86,15 +86,19 @@ export const releaseEditorMedia = (editor: Editor) => {
 /**
  * Replace the document with a fresh EditorState so undo/redo cannot leak
  * across memos. Cheaper than destroying the TipTap view on every switch.
- * Releases decoded images from the previous document first.
+ * Release removed media after updating; unchanged image NodeViews are reused.
  */
 export const resetEditorDocument = (editor: Editor, content: TiptapDoc) => {
-  releaseEditorMedia(editor);
+  const root=editor.view.dom;
+  const previousMedia=Array.from(root.querySelectorAll("img, iframe, embed, object, video, audio, source, canvas"));
   editor.view.updateState(EditorState.create({
     schema: editor.schema,
     doc: editor.schema.nodeFromJSON(content),
     plugins: editor.state.plugins,
   }));
+  releaseHtmlMediaSources({
+    querySelectorAll: (selector)=>previousMedia.filter(node=>node.matches(selector) && !root.contains(node)),
+  });
 };
 
 export const CREATED_MEMO_FOCUS_MAX_ATTEMPTS = 120;

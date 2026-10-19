@@ -17,6 +17,8 @@
 - [12. AI 智能生成专业信息图（时间线、对比图、架构图等）](#12-ai-智能生成专业信息图时间线对比图架构图等)
 - [13. 借助右侧 AI 助手一句话生成多维表格](#13-借助右侧-ai-助手一句话生成多维表格)
 - [14. 多维表格一键生成在线公开收集表单](#14-多维表格一键生成在线公开收集表单)
+- [15. 连接本机 Agent (ACP) 赋能笔记读写与智能伴随问答](#15-连接本机-agent-acp-赋能笔记读写与智能伴随问答)
+- [16. 笔记一键设计小红书与社交媒体精美封面海报](#16-笔记一键设计小红书与社交媒体精美封面海报)
 
 ---
 
@@ -96,11 +98,17 @@
 
 EdgeEver 内置的 AI RSS 订阅能力可自动聚合行业前沿资讯，智能过滤冗余噪音，生成结构严谨、重点清晰的精炼日报笔记。
 
-结合「分享为图片」功能，可自定义 8 款精美主题风格、衬线/等宽字体、卡片宽度及展示字段，一键导出高清长图或复制到剪贴板，优雅分享至社交媒体与社群。
+结合「分享为图片」功能，可自定义 8 款精美主题风格（包含书摘、备忘录、便当、黑白、框界、代码等）、衬线/等宽字体、卡片宽度及展示字段，一键导出高清长图或复制到剪贴板，优雅分享至社交媒体与社群。
 
 | 1. 自动生成 RSS 日报并选择「分享为图片」 | 2. 自定义主题、字体与卡片版式 | 3. 导出的高清长图卡片效果 |
 | :---: | :---: | :---: |
 | ![EdgeEver 笔记菜单点击分享为图片](assets/best-practices/rss-daily-menu-share-image.png) | ![EdgeEver 分享为图片配置弹窗](assets/best-practices/rss-daily-poster-modal.png) | ![导出的高清 RSS 日报长图](assets/best-practices/rss-daily-exported-poster.png) |
+
+针对代码片段、技术随笔与极客笔记，还可一键切换为专属的「代码」主题风格，自带 macOS 窗口控件、行号与等宽语法排版，优雅导出高颜值技术分享卡片：
+
+| 「代码」主题样式配置与预览效果 |
+| :---: |
+| ![EdgeEver 分享为图片代码风格主题效果](assets/best-practices/note-export-code-theme.png) |
 
 ---
 
@@ -187,3 +195,28 @@ AI 会自动检索并校对关键时间与信息事实，一键原地生成具�
 | ![多维表格顶部点击表单收集按钮](assets/best-practices/database-form-collection-btn.png) | ![对外公开的在线表单填报界面](assets/best-practices/database-public-form-page.png) |
 
 ---
+
+## 15. 连接本机 Agent (ACP) 赋能笔记读写与智能伴随问答
+
+EdgeEver 深度支持 **ACP (Agent Client Protocol)** 协议，允许桌面端无缝桥接本机运行的高级 Agent（涵盖 Codex、DeepSeek Harness、Claude Code、Antigravity、OpenClaw、WorkBuddy、Hermes Agent 等多样化客户端生态）。
+
+通过 ACP 连接后，EdgeEver 会自动向本地 Agent 授予当前账号笔记的安全读写权限。无需离开编辑器，在右侧伴随式 AI 侧边栏即可直接与本地运行的 Agent 实时对话，完成代码推理、笔记总结、多步分析与全库知识问答。
+
+| 1. 在设置中连接本机 Agent 客户端 (ACP) | 2. 笔记侧边栏直接与本机 Agent 协同对话 |
+| :---: | :---: |
+| ![设置中心连接本机 Agent (ACP) 列表](assets/best-practices/acp-support-list.png) | ![右侧 AI 伴随助手与本机 Agent 协同问答](assets/best-practices/acp-support-list-dialog.png) |
+
+---
+
+## 16. 笔记一键设计小红书与社交媒体精美封面海报
+
+在普通笔记操作菜单中点击「制作海报」（或通过「新建 → 海报」），即可将笔记标题、金句与核心要点一键载入 **EdgeEver 海报设计工作台**。
+
+系统预置了 40+ 款专业级社交媒体海报模板（涵盖“编辑大标题”、“创作手记”、“一词冲击”、“荧光标题”等爆款视觉风格），支持小红书 3:4、朋友圈、横版等主流自媒体画幅比例。用户可在画布上自由调整文字、颜色与几何装饰形状，完成后一键复制或导出高分辨率 PNG，轻松将长文沉淀转换为高吸引力的社交媒体视觉作品。
+
+| 笔记一键载入海报工作台，套用 40+ 款专业社媒模板 |
+| :---: |
+| ![EdgeEver 海报设计工作台与丰富设计模板](assets/best-practices/poster-design-templates.png) |
+
+---
+

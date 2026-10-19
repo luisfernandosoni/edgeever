@@ -1,4 +1,9 @@
+import { watchUiCatalogFont } from "./editor-catalog-fonts";
+import { isRemoteNoteImageFont } from "@edgeever/shared/font-catalog-data";
+import { LEGACY_BODY_FONTS } from "@edgeever/shared/font-defaults";
+import type { BodyFontId } from "@edgeever/shared/font-loader";
 import {
+  BUNDLED_FONT_STACKS,
   type EditorBodyFontChoice,
   type EditorBodyFontPreference,
   isEditorBodyFontChoice,
@@ -35,7 +40,7 @@ const writeStorage = (key: string, value: string) => {
 export const readUiFontPreference = (): UiFontPreference => {
   const storedChoice = readStorage(UI_FONT_STORAGE_KEY);
   const customFamily = readStorage(UI_FONT_CUSTOM_STORAGE_KEY) ?? "";
-  if (!isEditorBodyFontChoice(storedChoice)) return { ...DEFAULT_PREFERENCE, customFamily };
+  if (!isEditorBodyFontChoice(storedChoice) || !["system", "custom", ...Object.keys(BUNDLED_FONT_STACKS)].includes(storedChoice)) return { ...DEFAULT_PREFERENCE, customFamily };
   return { choice: storedChoice, customFamily };
 };
 
@@ -47,6 +52,7 @@ export const writeUiFontPreference = (preference: UiFontPreference) => {
 export const applyUiFontPreference = (preference = readUiFontPreference()) => {
   if (typeof document === "undefined") return;
   const root = document.documentElement;
+  watchUiCatalogFont(isRemoteNoteImageFont(preference.choice) || preference.choice in LEGACY_BODY_FONTS ? preference.choice as BodyFontId : undefined);
   const stack = resolveEditorBodyFontStack(preference);
   if (!stack) {
     delete root.dataset.uiFont;

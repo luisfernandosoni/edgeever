@@ -426,6 +426,8 @@ const SystemInfoCard = ({
       ? (english ? "Restart to apply" : "重启以应用")
       : updateKind === "ota"
         ? (english ? "Download update" : "下载更新")
+        : updateKind === "play"
+          ? (english ? "Update with Google Play" : "通过 Google Play 更新")
         : copy.openUpdate;
 
   const copySystemInfo = async () => {
@@ -538,6 +540,7 @@ const getMobileSystemInfoText = (localePreference: MobileLocaleMode) =>
         connectionFailed: "Connection failed",
         connectionSection: "Connection and sync",
         containerImageSource: "Container image source",
+        imageBuiltAt: "Image built at",
         databaseBackend: "Database backend",
         databaseVersion: "Database version",
         description: "View cloud instance and current client diagnostics.",
@@ -588,6 +591,7 @@ const getMobileSystemInfoText = (localePreference: MobileLocaleMode) =>
         connectionFailed: "连接失败",
         connectionSection: "连接与同步",
         containerImageSource: "容器镜像来源",
+        imageBuiltAt: "镜像构建时间",
         databaseBackend: "数据库后端",
         databaseVersion: "数据库版本",
         description: "查看云端实例与当前客户端的诊断信息。",
@@ -772,7 +776,15 @@ const getMobileSystemInfoGroups = (
           ? [{ fullWidth: true, label: copy.existingAttachments, value: copy.existingAttachmentsOriginalStorage }]
           : []),
         ...(instance?.health.runtime === "self-hosted-bun"
-          ? [{ fullWidth: true, label: copy.containerImageSource, value: getMobileContainerImageSource(instance.health.containerImageSource, english) }]
+          ? [
+              { fullWidth: true, label: copy.containerImageSource, value: getMobileContainerImageSource(instance.health.containerImageSource, english) },
+              {
+                label: copy.imageBuiltAt,
+                value: instance.health.buildCreatedAt && Number.isFinite(Date.parse(instance.health.buildCreatedAt))
+                  ? new Intl.DateTimeFormat(english ? "en-US" : "zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(instance.health.buildCreatedAt))
+                  : copy.unknown,
+              },
+            ]
           : []),
       ],
       title: copy.cloudSection,

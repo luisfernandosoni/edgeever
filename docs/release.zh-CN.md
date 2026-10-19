@@ -37,13 +37,19 @@ bun run release -- \
 --ignore-commit "89abcde:仅增加测试覆盖"
 ```
 
-覆盖审计在修改本地或 GitHub 状态之前执行。映射记录在跟踪 Issue 中，不写入
-公开 Release 说明。公开说明只包含用户可感知的变化、影响和必要的迁移提醒。
+覆盖审计在修改本地或 GitHub 状态之前执行，映射记录在跟踪 Issue 中。
+使用 `--dry-run` 预览提交覆盖、原生端重建计划和 Release 说明。
 
-使用 `--dry-run` 查看提交覆盖、原生端重建计划和说明。发布完成后不会下载、
-安装或启动 macOS 应用；已安装的 macOS、Windows 与 Linux 桌面端通过应用内自动
-更新机制获取新版。Linux 预览版发布前必须通过真实 AppImage 跨版本更新验证。仅在
-确实需要原有安装验收时显式传入 `--install-desktop`。
+### 外部贡献者署名
+
+- 维护者本人完成的内容无需署名；外部贡献在对应条目末尾注明 `@username` 和 PR。
+- 同一人贡献多项时可改为集中致谢。结尾名单仅列出未逐条致谢的人，名单为空则省略。
+- GitHub 原生 Contributors 头像区由正文中的 `@username` 自动生成，逐条提及同样有效。
+
+逐条署名写入 `--change-zh` / `--change-en`；集中名单使用可重复的
+`--contributor alice`，脚本会在双语说明末尾追加
+`贡献者 / Contributors：@alice`。该参数不自动推断贡献者。
+续跑已有 Draft 时保留原说明，调整署名需直接编辑 Draft。
 
 ## EdgeEver 特有规则
 
@@ -59,7 +65,7 @@ bun run release -- \
   GitHub Tag，避免仅涉及 Web 或 API 的 Release 触发无效原生更新。
 - 脚本负责创建跟踪 Issue 和 Draft Release、验证或复用原生资产、准备并审计
   GHCR 多架构 Docker 镜像、正式发布、关闭 Issue，
-  默认不安装桌面端应用；安装能力作为显式选项保留。
+  默认不安装桌面端应用；安装验收需显式传入 `--install-desktop`。
   输出 Actions 链接后，Demo 部署会独立继续执行。
 - 独立工作流会把同一个已验证 Git 提交发送到 CNB；正式 Release 发布后，CNB
   在腾讯云侧异步构建并审计 TCR 公共镜像。其耗时或失败不会阻塞 GitHub

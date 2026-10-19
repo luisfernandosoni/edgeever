@@ -9,6 +9,7 @@ export type GithubRepoTarget = {
 
 export type GithubRepoPageSource = {
   pageUrl: string;
+  repositoryNwo?: string;
   openGraphDescription: string;
   embeddedJsonChunks: string[];
   aboutText: string;
@@ -185,7 +186,7 @@ const cleanLicense = (value: string) => collapse(value).replace(/\s+license$/i, 
 
 const cleanLanguage = (value: string) => {
   const text = collapse(value).replace(/\s+\d+(?:\.\d+)?%$/, "").trim();
-  if (!text || text.length > 40 || /%$/.test(text) || /^languages?$/i.test(text)) return "";
+  if (!text || text.length > 40 || text.endsWith("%") || /^languages?$/i.test(text)) return "";
   return text;
 };
 
@@ -217,11 +218,14 @@ export const githubRepoFactsFromSource = (source: GithubRepoPageSource): GithubR
     }
   }
   const matched = records.filter((record) => sameName(record.owner, target.owner) && sameName(record.name, target.name));
-  if (matched.length === 0) return null;
+  // Client-side navigation can omit the initial JSON, and large READMEs can
+  // exceed the snapshot's JSON limit. GitHub's repository metadata provides
+  // an independent identity check before falling back to rendered content.
+  const metadataMatches = sameName(source.repositoryNwo?.trim() ?? "", `${target.owner}/${target.name}`);
+  if (matched.length === 0 && !metadataMatches) return null;
   const richest = matched.find((record) => record.description || record.topics.length || record.homepage) ?? matched[0];
-  if (!richest) return null;
-  const owner = richest.owner;
-  const name = richest.name;
+  const owner = richest?.owner ?? target.owner;
+  const name = richest?.name ?? target.name;
   const description = [
     ...matched.map((record) => record.description),
     source.aboutText,

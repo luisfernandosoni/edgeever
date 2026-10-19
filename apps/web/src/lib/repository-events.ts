@@ -59,8 +59,8 @@ export const withRepositoryMutationEvents = (repository: EdgeEverRepository, sco
     notifyRepositoryMutation(scope, { type: "note.updated", note: result.memo });
     return result;
   },
-  async useTemplate(templateId, notebookId) {
-    const result = await repository.useTemplate(templateId, notebookId);
+  async useTemplate(templateId, notebookId, locale) {
+    const result = await repository.useTemplate(templateId, notebookId, locale);
     notifyRepositoryMutation(scope, { type: "note.created", note: result.memo });
     return result;
   },
@@ -97,6 +97,11 @@ export const withRepositoryMutationEvents = (repository: EdgeEverRepository, sco
   async deleteTemplate(templateId) {
     const result = await repository.deleteTemplate(templateId);
     notifyRepositoryMutation(scope, { type: "template.deleted", templateId });
+    return result;
+  },
+  async duplicateMemo(memoId, input) {
+    const result = await repository.duplicateMemo(memoId, input);
+    notifyRepositoryMutation(scope, { type: "note.created", note: result.memo });
     return result;
   },
   async mergeMemos(input) {

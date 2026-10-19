@@ -23,6 +23,7 @@ import {
   sanitizeFailureDetail,
   spawnAcpChild,
 } from "./acp-host.mjs";
+import { prepareWorkBuddyAuth } from "./workbuddy-auth.mjs";
 
 const require = createRequire(import.meta.url);
 const sdkHref = pathToFileURL(require.resolve("@agentclientprotocol/sdk")).href;
@@ -104,7 +105,10 @@ if (${workBuddyAccountApi ? "true" : "false"}) {
 if (${workBuddyUnreadable ? "true" : "false"}) authenticated = true;
 const restoredAccount = authenticated;
 const save = () => writeFileSync(reportPath, JSON.stringify(report));
-if (${workBuddyAccountApi ? "true" : "false"}) {
+// Like WorkBuddy, serve the account API only when started with --serve, which
+// sets SERVER__PORT. Probes and chats start without it, and listening on port
+// NaN is an error in Node and newer Bun versions.
+if (${workBuddyAccountApi ? "true" : "false"} && process.env.SERVER__PORT) {
   const { createServer } = await import("node:http");
   const server = createServer(async (req, res) => {
     if (req.headers.authorization !== "Bearer " + process.env.CODEBUDDY_GATEWAY_PASSWORD) {
@@ -348,7 +352,13 @@ describe("ACP command allow-list", () => {
       for (const name of ["claude-agent-acp", "openclaw", "hermes"]) {
         await writeFile(path.join(directory, name), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
       }
-      const deps = { platform: "darwin", pathEnv: directory, home: directory };
+      // Only the temporary directory exists, so commands installed on the
+      // machine running the tests (for example in /opt/homebrew/bin) are ignored.
+      const onlyTemporaryDirectory = (candidate) => {
+        if (!candidate.startsWith(directory)) throw Object.assign(new Error(`ENOENT: ${candidate}`), { code: "ENOENT" });
+        return realpathSync(candidate);
+      };
+      const deps = { platform: "darwin", pathEnv: directory, home: directory, realpathSync: onlyTemporaryDirectory };
       expect(resolveAcpCommand({ id: "claudeCode" }, deps).command).toMatchObject({ command: realpathSync(path.join(directory, "claude-agent-acp")), args: [] });
       expect(resolveAcpCommand({ id: "openClaw" }, deps).command).toMatchObject({ command: realpathSync(path.join(directory, "openclaw")), args: ["acp"] });
       expect(resolveAcpCommand({ id: "hermesAgent" }, deps).command).toMatchObject({ command: realpathSync(path.join(directory, "hermes")), args: ["acp"] });
@@ -357,6 +367,30 @@ describe("ACP command allow-list", () => {
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
+  });
+
+  test("records sanitized update failures and clears them after a manual retry including no-op success", async () => {
+    let fail = true;
+    const diagnostics = [];
+    const runtime = createAcpHostRuntime({
+      onUpdateDiagnostic: (event) => diagnostics.push(event),
+      adapterManager: {
+        get: (id) => id === "antigravity" ? { version: "1.3.0", command: { command: "/tmp/agy", args: [] } } : null,
+        installedIds: () => ["antigravity"],
+        install: async () => {
+          if (fail) throw Object.assign(new Error("fetch failed https://example.com/?token=private"), { updateStage: "download", cause: { code: "ETIMEDOUT" } });
+          return { updated: false, version: "1.3.0" };
+        },
+      },
+    });
+    const [result] = await runtime.updateInstalled();
+    expect(result.reason).toBe("download: fetch failed [url] (ETIMEDOUT)");
+    expect(runtime.listAdapters().find((item) => item.id === "antigravity").updateError).toBe(result.reason);
+    expect(diagnostics).toEqual([{ id: "antigravity", reason: result.reason }]);
+    await expect(runtime.installAdapter("antigravity")).rejects.toThrow(result.reason);
+    fail = false;
+    expect(await runtime.installAdapter("antigravity")).toEqual({ updated: false, version: "1.3.0" });
+    expect(runtime.listAdapters().find((item) => item.id === "antigravity").updateError).toBeUndefined();
   });
 
   test("automatically installs only a detected agent missing its ACP connector", async () => {
@@ -445,6 +479,21 @@ describe("ACP command allow-list", () => {
       expect(nativeInternational.command.args.slice(1)).toEqual([realpathSync(bundled), "--acp"]);
       expect(nativeInternational.command.env).toEqual({ ELECTRON_RUN_AS_NODE: "1" });
       expect(nativeInternational.command.unsetEnv).toEqual(["CODEBUDDY_INTERNET_ENVIRONMENT"]);
+      // WorkBuddy 5.8+ ships only the lite-wb bundle, whose stdio ACP needs --serve.
+      const dist = path.resolve(path.dirname(bundled), "../dist");
+      await mkdir(dist, { recursive: true });
+      await writeFile(path.join(dist, "codebuddy-lite-wb.mjs"), "// fake lite-wb bundle");
+      const liteDomestic = resolveAcpCommand({ id: "workbuddyCn" }, deps);
+      expect(liteDomestic.command.args.slice(1)).toEqual([realpathSync(bundled), "--acp", "--serve", "--acp-transport", "stdio", "--host", "127.0.0.1"]);
+      expect(liteDomestic.command.env).toEqual({ CODEBUDDY_INTERNET_ENVIRONMENT: "internal", CODEBUDDY_FORCE_LITE_WB_BUNDLE: "1", SERVER__HOST: "127.0.0.1", ELECTRON_RUN_AS_NODE: "1" });
+      const liteAuth = await prepareWorkBuddyAuth(liteDomestic.command);
+      for (const flag of ["--serve", "--acp-transport", "--host", "--port"]) {
+        expect(liteAuth.command.args.filter((arg) => arg === flag)).toHaveLength(1);
+      }
+      expect(liteAuth.command.args).toEqual([...liteDomestic.command.args, "--port", new URL(liteAuth.endpoint).port]);
+      // A full bundle beside lite-wb keeps the legacy launch.
+      await writeFile(path.join(dist, "codebuddy.js"), "// fake full bundle");
+      expect(resolveAcpCommand({ id: "workbuddyCn" }, deps).command.args.slice(1)).toEqual([realpathSync(bundled), "--acp"]);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
@@ -677,9 +726,11 @@ describe("ACP stdio session", () => {
       await chmod(wrapper, 0o755);
       const { spawn } = await import("node:child_process");
       const spawned = [];
+      const processDiagnostics = [];
       const runtime = createAcpHostRuntime({
         platform: "darwin",
         env: {},
+        onProcessDiagnostic: (event) => processDiagnostics.push(event),
         readProxy: () => "HTTPEnable : 1\nHTTPProxy : 127.0.0.1\nHTTPPort : 10808\nHTTPSEnable : 1\nHTTPSProxy : 127.0.0.1\nHTTPSPort : 10809\nSOCKSEnable : 1",
         spawnImpl(command, args, options) {
           spawned.push({ command, args, cwd: options.cwd, shell: options.shell, httpProxy: options.env?.HTTP_PROXY, httpsProxy: options.env?.HTTPS_PROXY });
@@ -704,6 +755,10 @@ describe("ACP stdio session", () => {
       expect(report.newSession.mcpServers).toEqual([]);
       const pid = Number(await readFile(`${reportPath}.pid`, "utf8"));
       await waitUntilExited(pid);
+      expect(processDiagnostics).toEqual([
+        { event: "spawned", requestId: "probe-antigravity", pid },
+        { event: "exited", requestId: "probe-antigravity", pid, code: null, signal: "SIGTERM" },
+      ]);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

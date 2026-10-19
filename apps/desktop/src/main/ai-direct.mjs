@@ -1,4 +1,4 @@
-import { nodePublicFetch } from "@edgeever/public-network/node";
+import { nodePublicFetch, publicLookup } from "@edgeever/public-network/node";
 import { validatePublicUrl } from "@edgeever/public-network/policy";
 
 const MAX_BODY_BYTES = 12 * 1024 * 1024;
@@ -12,6 +12,18 @@ export const validateAiProviderUrl = (value) => {
   }
   if (url.port && url.port !== "443") throw new Error("AI provider requests must use port 443.");
   return url;
+};
+
+export const canUseAiProviderUrl = async (value, lookupImpl = publicLookup) => {
+  try {
+    const url = validateAiProviderUrl(value);
+    await new Promise((resolve, reject) => {
+      lookupImpl(url.hostname, { all: true }, error => error ? reject(error) : resolve());
+    });
+    return true;
+  } catch {
+    return false;
+  }
 };
 
 export const createAiDirectRuntime = ({ fetchImpl = nodePublicFetch, maxConcurrent = MAX_CONCURRENT } = {}) => {

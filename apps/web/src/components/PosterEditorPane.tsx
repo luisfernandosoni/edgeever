@@ -1,5 +1,9 @@
+import { withFontDeadline } from "@edgeever/shared/font-loader";
+import { FontLoadFeedback } from "./FontLoadFeedback";
+import { createFontLoadState } from "@/lib/font-load-state";
+import { loadPosterFont } from "@/lib/poster-design/fonts";
 import { AI_ASSISTANT_LAUNCHER_POSITION } from "@/lib/ai-assistant-launcher";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useTranslation } from "react-i18next";
 import {
   ArrowLeft,
@@ -37,7 +41,6 @@ import {
   type PosterElement,
 } from "@edgeever/shared";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
   Dialog,
   DialogContent,
@@ -169,6 +172,7 @@ export default function PosterEditorPane({
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [busy, setBusy] = useState(false),
     [canvasReady, setCanvasReady] = useState(false),
+    [fontLoadState] = useState(createFontLoadState),
     [canvasRevision, setCanvasRevision] = useState(0),
     [saving, setSaving] = useState(false),
     [ready, setReady] = useState(false);
@@ -199,6 +203,7 @@ export default function PosterEditorPane({
     [exportScale, setExportScale] = useState(1),
     [exportQuality, setExportQuality] = useState(0.92);
   const [toast, setToast] = useState("");
+  const [templateFontsLoading, setTemplateFontsLoading] = useState(false);
   const [recovery, setRecovery] = useState<{
     title: string;
     document: PosterDocument;
@@ -243,6 +248,7 @@ export default function PosterEditorPane({
   } | null>(null);
   const draftKey = `edgeever:poster-draft:${memo.id}`;
   const dirty = snapshot(title, document) !== saved || tagsText !== savedTags;
+  const fontStatus = useSyncExternalStore(fontLoadState.subscribe, fontLoadState.getSnapshot, fontLoadState.getSnapshot);
   const editable = !readOnly && Boolean(initial) && ready && !busy;
   const selectedElements = document.elements.filter((element) =>
     selectedIds.includes(element.id),
@@ -782,6 +788,19 @@ export default function PosterEditorPane({
     };
     instance.on("object:modified", changed);
     instance.on("text:editing:exited", changed);
+    instance.on("text:changed", ({ target }) => {
+      if (!(target instanceof Textbox)) return;
+      const text = target.text;
+      const family = target.fontFamily;
+      const refresh = () => {
+        if (canvas.current !== instance || target.text !== text || target.fontFamily !== family) return;
+        target.initDimensions(); target.setCoords(); target.dirty = true;
+        instance.requestRenderAll();
+      };
+      const pending = loadPosterFont(family, text, { deadline: false });
+      void fontLoadState.run(() => withFontDeadline(pending), { pending, onReady: refresh })
+        .then(refresh).catch(() => { /* The banner exposes fallback and retry. */ });
+    });
     instance.on("object:moving", ({ target }) => {
       if (!target || !options.current.snap || target instanceof ActiveSelection)
         return;
@@ -855,9 +874,22 @@ export default function PosterEditorPane({
     setCanvasReady(false);
     const value = current.current.document,
       ids = [...selected.current];
-    void Promise.all(
-      value.elements.map((element) => posterObject(element, readResource)),
-    )
+    const fonts = Promise.all(value.elements.filter(element => element.type === "text")
+      .map(element => loadPosterFont(element.fontFamily, element.text, { deadline: false })));
+    void fontLoadState.run(() => withFontDeadline(fonts), { pending: fonts, onReady: () => {
+      if (cancelled) return;
+      // Restore metrics in place without replacing edits, selection or undo history.
+      for (const [index, object] of objectsRef.current.entries()) {
+        const element = current.current.document.elements[index];
+        if (object instanceof Textbox && element?.type === "text") {
+          object.set({ width: element.width });
+          object.initDimensions(); object.setCoords(); object.dirty = true;
+        }
+      }
+      instance.requestRenderAll();
+    } })
+      .catch(() => { /* Keep the fallback visible while the original operation finishes. */ })
+      .then(() => cancelled ? [] : Promise.all(value.elements.map(element => posterObject(element, readResource, true))))
       .then((objects) => {
         if (cancelled) return;
         instance.discardActiveObject();
@@ -903,8 +935,14 @@ export default function PosterEditorPane({
       });
     return () => {
       cancelled = true;
+      fontLoadState.reset();
     };
-  }, [canvasRevision, readOnly, readResource]);
+  }, [canvasRevision, readOnly, readResource, fontLoadState]);
+  useEffect(() => {
+    const retryFonts = () => { if (fontLoadState.getSnapshot() === "error") setCanvasRevision(value => value + 1); };
+    window.addEventListener("online", retryFonts);
+    return () => window.removeEventListener("online", retryFonts);
+  }, [fontLoadState]);
   useEffect(() => {
     const instance = canvas.current;
     if (!instance) return;
@@ -1138,7 +1176,7 @@ export default function PosterEditorPane({
         const sourceSession = requiresLocalEditSession(source)
           ? createLocalEditSession(source)
           : (await api.createMemoEditSession(source.id)).editSession;
-        const markdown = `${source.contentMarkdown}\n\n![${title.replace(/[\[\]\\\n]/g, " ")}](${resource.url})`;
+        const markdown = `${source.contentMarkdown}\n\n![${title.replace(/[[\]\\\n]/g, " ")}](${resource.url})`;
         const result = await repository.updateMemo(source, {
           expectedRevision: source.revision,
           expectedContentHash: source.contentHash,
@@ -1178,8 +1216,11 @@ export default function PosterEditorPane({
     const editing = canvas.current?.getActiveObject();
     if (editing instanceof Textbox && editing.isEditing) editing.exitEditing();
     const value = current.current.document;
-    const built = await applyPosterDesign(value, id, zh, width, height);
-    return { ...built, platformId };
+    setTemplateFontsLoading(true);
+    try {
+      const built = await applyPosterDesign(value, id, zh, width, height);
+      return { ...built, platformId };
+    } finally { setTemplateFontsLoading(false); }
   };
   const applyTemplate = (id: string) =>
     run(async () => {
@@ -1520,6 +1561,10 @@ export default function PosterEditorPane({
         </Button>
         </div>
       </header>
+      <div className="shrink-0 px-4" data-template-font-status="">
+        <FontLoadFeedback template status={templateFontsLoading ? "loading" : fontStatus}
+          onRetry={() => setCanvasRevision(value => value + 1)} />
+      </div>
       {error && (
         <div
           role="alert"
@@ -1803,8 +1848,6 @@ export default function PosterEditorPane({
             <div className="min-h-0 flex-1 overflow-y-auto">
               {leftTab === "templates" ? (
                 <PosterTemplatePanel
-                  width={document.width}
-                  height={document.height}
                   platformId={platform?.id}
                   templateId={document.templateId}
                   zh={zh}
@@ -2024,6 +2067,8 @@ export default function PosterEditorPane({
             <div className="min-h-0 flex-1 overflow-y-auto">
               {rightTab === "properties" ? (
                 <PosterInspector
+                  fontStatus={fontStatus}
+                  onRetryFont={() => { setError(null); setCanvasRevision(value => value + 1); }}
                   elements={selectedElements}
                   disabled={!editable}
                   zh={zh}
@@ -2063,6 +2108,7 @@ export default function PosterEditorPane({
             <DialogTitle>{t("poster.design.export")}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
+            <FontLoadFeedback template status={fontStatus} onRetry={() => setCanvasRevision(value => value + 1)} />
             <div className="grid grid-cols-3 gap-2">
               {(["png", "jpeg", "webp"] as const).map((format) => (
                 <Button

@@ -1,12 +1,11 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { DIAGRAM_CANVAS_LIGHT } from "@edgeever/shared";
+import { DIAGRAM_CANVAS_LIGHT } from "@edgeever/shared/diagram-canvas";
 import {
   DEFAULT_CUSTOM_DARK_COLORS,
   DEFAULT_CUSTOM_EDITOR_THEME,
   DEFAULT_CUSTOM_LIGHT_COLORS,
   normalizeThemeColors,
   type CustomEditorTheme,
-  type ThemeColors,
 } from "@/lib/custom-editor-theme";
 
 export {

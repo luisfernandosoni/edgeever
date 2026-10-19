@@ -1,47 +1,22 @@
+import { FONT_CATALOG, findCatalogFont } from "@edgeever/shared/font-catalog";
+import { loadCatalogFont, loadOfflineFonts, withFontDeadline } from "@edgeever/shared/font-loader";
+import { cache } from "fabric";
 import { POSTER_FONTS } from "@edgeever/shared";
 export { POSTER_FONTS };
-const loads = new Map<string, Promise<void>>();
-export function loadPosterFont(family: string) {
-  const font = POSTER_FONTS.find((entry) => entry.family === family);
-  if (!font) return Promise.resolve();
-  if (!loads.has(family)) {
-    const face = new FontFace(
-      family,
-      `url("/poster-fonts/${font.file}.${font.file === "douyin" ? "ttf" : "woff2"}")`,
-    );
-    const promise = face
-      .load()
-      .then((loaded) => {
-        window.document.fonts.add(loaded);
-      })
-      .catch((error) => {
-        loads.delete(family);
-        throw error;
-      });
-    loads.set(family, promise);
-  }
-  return loads.get(family)!;
+export async function loadPosterFont(family: string, text = "", { deadline = true }: { deadline?: boolean } = {}) {
+  // The deadline must include bundled fallback preparation: a damaged local
+  // asset can fall through to slow remote mirrors before catalog loading starts.
+  const prepare = async () => {
+    await loadOfflineFonts(text || "EdgeEver 中文");
+    const registrationFamily = family.split(",")[0].trim().replace(/^["']|["']$/g, "");
+    const id = findCatalogFont(registrationFamily);
+    if (!id) return;
+    await loadCatalogFont(id, text || `${FONT_CATALOG[id].zh} ${FONT_CATALOG[id].en}`, { family: registrationFamily });
+    cache.clearFontCache(family);
+    // Fabric keys glyph metrics by the complete runtime fallback stack.
+    cache.clearFontCache(`${registrationFamily}, "EdgeEver Offline Sans", sans-serif`);
+  };
+  await (deadline ? withFontDeadline(prepare()) : prepare());
 }
-export const loadDesignFonts = (zh: boolean) =>
-  Promise.all(
-    (zh
-      ? [
-          "思源黑体",
-          "思源黑体 Heavy",
-          "思源宋体",
-          "思源宋体 Heavy",
-          "得意黑",
-          "霞鹜文楷",
-          "抖音美好体",
-          "马善政楷书",
-          "江城圆体",
-          "站酷庆科黄油体",
-          "未来荧黑",
-          "朱雀仿宋",
-          "站酷快乐体",
-          "DM Serif Display",
-          "Anton",
-        ]
-      : ["Inter", "DM Serif Display", "Bebas Neue", "Space Grotesk"]
-    ).map(loadPosterFont),
-  );
+export const loadDesignFonts = (families: string[], text: string) =>
+  Promise.all([...new Set(families)].map(family => loadPosterFont(family, text).catch(() => { /* Templates still render with the offline default. */ })));

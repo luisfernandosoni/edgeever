@@ -1,3 +1,4 @@
+import { PUBLISHED_NOTE_BODY_FONTS } from "./sharing";
 import { z } from "zod";
 import {
   MAX_NOTE_PROSE_CSS_BYTES,
@@ -75,6 +76,9 @@ export const TemplateUpdateSchema = z.object({
 
 export const TemplateUseSchema = z.object({
   notebookId: z.string().trim().min(1),
+  // The client's UI language. Default templates nobody edited are used in
+  // this language; without it every template is used as stored.
+  locale: z.string().trim().min(1).max(64).optional(),
 });
 
 const ScheduledPluginCommandPayloadSchema = z.object({
@@ -163,6 +167,11 @@ export const DeleteMemosSchema = z.object({
   permanent: z.boolean().optional(),
 });
 
+export const DuplicateMemoSchema = z.object({
+  notebookId: z.string().trim().min(1).optional(),
+  title: z.string().trim().max(160).optional(),
+});
+
 export const MergeMemosSchema = z.object({
   memoIds: z.array(z.string().trim().min(1)).min(2).max(50),
   notebookId: z.string().trim().min(1).optional(),
@@ -173,6 +182,9 @@ export const LoginSchema = z.object({
   username: z.string().trim().min(1).max(80),
   password: z.string().min(1).max(512),
   deviceId: z.string().trim().min(16).max(160).optional(),
+  // The client's resolved UI locale. Used once, to localize a new workspace's
+  // default notebooks and notes at its first sign-in.
+  locale: z.string().trim().min(1).max(35).optional(),
 });
 
 export const LoginDeviceSessionUpdateSchema = z.object({
@@ -337,6 +349,7 @@ export const AiDefaultModelUpdateSchema = z.object({
 });
 
 export const AiAttachmentSchema = z.object({
+  // oxlint-disable-next-line no-control-regex -- rejects control characters in attachment filenames
   filename: z.string().trim().min(1).max(255).regex(/^[^\u0000-\u001F\u007F]+$/),
   mediaType: z.enum(AI_ATTACHMENT_MEDIA_TYPES),
   base64Data: z.string().min(1).max(Math.ceil(MAX_AI_ATTACHMENT_BYTES / 3) * 4),
@@ -429,7 +442,7 @@ export const MemoShareUpdateSchema = SharePasswordUpdateSchema;
 export const NotebookShareUpdateSchema = SharePasswordUpdateSchema;
 
 export const NoteBodyFontUpdateSchema = z.object({
-  bodyFont: z.enum(["wenkai", "wenkai-screen", "zhuque", "source-han-serif", "neo-zhi-song", "source-han-sans", "source-serif"]).nullable(),
+  bodyFont: z.enum(PUBLISHED_NOTE_BODY_FONTS).nullable(),
 });
 
 const noteProseHexColor = z.string().regex(/^#[0-9a-f]{6}$/i);

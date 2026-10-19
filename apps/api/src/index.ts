@@ -45,8 +45,9 @@ import {
   restoreJsonNotebooks as restoreJsonNotebooksService,
 } from "./backup-service";
 import { sha256, sha256Bytes } from "./hash-utils";
+import { PUBLIC_PAGE_HEADERS } from "@edgeever/shared/public-page-headers";
 import { INSTANCE_BUILD_ID } from "./instance-build";
-import { resolveDeploymentVersionCreatedAt, resolveInstanceDeploymentMetadata } from "./instance-deployment";
+import { resolveDeploymentVersionCreatedAt, resolveImageBuildMetadata, resolveInstanceDeploymentMetadata } from "./instance-deployment";
 import type {
   DatabaseAdapter,
   PreparedStatementAdapter,
@@ -103,21 +104,15 @@ import {
   deleteMemoRecord,
   deleteMemosRecord,
   emptyTrashMemosRecord,
-  getCurrentWorkspaceIdentity,
   getMemoDetail,
   getMemoDetailRow,
-  getMemosForBulkAction,
-  importMemosRecord,
-  listMemosForMcp,
   mapMemoDetail,
   mergeMemosRecord,
   moveMemosRecord,
-  moveMemosToNotebook,
   restoreMemoRecord,
-  restoreMemosRecord,
-  searchMemoSummaries,
   updateMemoRecord,
 } from "./memo-service";
+import { duplicateMemoRecord } from "./memo-duplicate-service";
 
 export { createMemoEditSession, mergeMemosRecord, updateMemoRecord };
 import { listMemos } from "./memo-list-service";
@@ -182,6 +177,16 @@ app.use(
   })
 );
 
+// Every anonymous share/form response, including errors, stays out of search
+// indexes and shared caches. Routes may still set a stricter Cache-Control.
+app.use("/api/public/*", async (c, next) => {
+  await next();
+  for (const [name, value] of Object.entries(PUBLIC_PAGE_HEADERS)) {
+    if (name === "Cache-Control" && c.res.headers.has(name)) continue;
+    c.res.headers.set(name, value);
+  }
+});
+
 app.get("/api/release", (c) => c.json(releaseSummary));
 
 const getAppliedMigration = async (env: Bindings) => {
@@ -232,7 +237,10 @@ app.get("/api/health", async (c) => {
     name: "edgeever",
     runtime,
     ...(runtime === "self-hosted-bun"
-      ? { containerImageSource: resolveContainerImageSource(c.env.EDGE_EVER_CONTAINER_IMAGE) }
+      ? {
+          containerImageSource: resolveContainerImageSource(c.env.EDGE_EVER_CONTAINER_IMAGE),
+          ...resolveImageBuildMetadata(c.env),
+        }
       : {}),
     authMode,
     build: INSTANCE_BUILD_ID.slice(0, 12),
@@ -401,6 +409,7 @@ registerMemoRoutes(app, {
   getMemoDetail: (...args) => getMemoDetail(...args),
   listMemos: (...args) => listMemos(...args),
   listMemoRevisions: (...args) => listMemoRevisionsService(...args, getMemoDetail, false),
+  duplicateMemo: (...args) => duplicateMemoRecord(...args),
   mergeMemos: (...args) => mergeMemosRecord(...args),
   moveMemos: (...args) => moveMemosRecord(...args),
   restoreMemo: (...args) => restoreMemoRecord(...args),

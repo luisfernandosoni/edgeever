@@ -1,4 +1,6 @@
 import { afterAll, describe, expect, test } from "bun:test";
+import { canUseAiProviderUrl, createAiDirectRuntime } from "../../../desktop/src/main/ai-direct.mjs";
+import { createPublicLookup } from "../../../../packages/public-network/src/node.mjs";
 
 const storage = new Map();
 const calls = [];
@@ -6,6 +8,11 @@ const events = [];
 let completeSave;
 let secureSessionToken = "";
 let failSecureSessionWrite = false;
+let aiRuntime;
+const aiStreamListeners = new Set();
+const aiLookup = createPublicLookup((host, _options, callback) => callback(null, [
+  { address: host === "model.intranet.example.com" ? "10.20.30.40" : "93.184.216.34", family: 4 },
+]));
 const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
 const originalFetch = Object.getOwnPropertyDescriptor(globalThis, "fetch");
 
@@ -15,6 +22,17 @@ globalThis.window = {
   edgeeverDesktop: {
     isAvailable: true,
     apiBaseUrl: "",
+    canUseAiProviderUrl: url => canUseAiProviderUrl(url, aiLookup),
+    openAiProviderStream: (requestId, input) => aiRuntime.open(requestId, input, {
+      onData: bytes => { for (const listener of aiStreamListeners) listener(requestId, { type: "data", bytes }); },
+      onEnd: () => { for (const listener of aiStreamListeners) listener(requestId, { type: "end" }); },
+      onError: error => { for (const listener of aiStreamListeners) listener(requestId, { type: "error", message: error.message }); },
+    }),
+    onAiProviderStreamChunk: listener => {
+      aiStreamListeners.add(listener);
+      return () => aiStreamListeners.delete(listener);
+    },
+    cancelAiProviderStream: requestId => aiRuntime.cancel(requestId),
     setApiBaseUrl: async (value) => {
       calls.push(["bridge:start", value]);
       if (!value) {
@@ -67,6 +85,7 @@ afterAll(() => {
   }
 });
 
+// Other test files may have imported the browser client before this desktop bridge.
 const {
   ApiRequestError,
   DESKTOP_API_BASE_URL_STORAGE_KEY,
@@ -76,7 +95,164 @@ const {
   getConfiguredDesktopApiBaseUrl,
   getCachedDesktopSession,
   saveDesktopApiBaseUrl,
-} = await import("./api.ts");
+} = await import("./api.ts?desktop-ai-routing-test");
+
+describe("desktop AI routing", () => {
+  for (const baseUrl of [
+    "http://192.168.1.20:11434/v1",
+    "https://192.168.1.20/v1",
+    "https://127.0.0.1/v1",
+    "https://[::1]/v1",
+    "https://model.lan/v1",
+    "https://model.example.com:8443/v1",
+    "https://model.intranet.example.com/v1",
+  ]) {
+    test(`proxies ${baseUrl} without fetching credentials or contacting the model`, async () => {
+      const paths = [];
+      let providerRequests = 0;
+      aiRuntime = createAiDirectRuntime({ fetchImpl: async () => {
+        providerRequests++;
+        throw new Error("The model must only be called by the instance");
+      } });
+      globalThis.fetch = async url => {
+        const path = new URL(String(url), "https://notes.example.com").pathname;
+        paths.push(path);
+        if (path === "/api/v1/ai/direct-target") {
+          return Response.json({ provider: "openai-compatible", baseUrl, modelId: "local-model" });
+        }
+        if (path === "/api/v1/companion/turns") {
+          return new Response('data: {"type":"text-delta","text":"server reply"}\n\n');
+        }
+        throw new Error(`Unexpected request: ${path}`);
+      };
+      const received = [];
+      await api.streamCompanion({ id: crypto.randomUUID(), message: "hi" }, { onEvent: event => received.push(event) });
+      expect(paths).toEqual(["/api/v1/ai/direct-target", "/api/v1/companion/turns"]);
+      expect(providerRequests).toBe(0);
+      expect(received).toEqual([{ type: "text-delta", text: "server reply" }]);
+      expect(aiStreamListeners.size).toBe(0);
+    });
+  }
+
+  for (const operation of ["resume", "generate"]) {
+    test(`proxies local-model ${operation} without preparing another generation`, async () => {
+      const turnId = crypto.randomUUID();
+      const proxyPath = operation === "resume" ? `/api/v1/companion/turns/${turnId}/resume` : "/api/v1/ai/generate";
+      const paths = [];
+      aiRuntime = createAiDirectRuntime({ fetchImpl: async () => { throw new Error("Unexpected model request"); } });
+      globalThis.fetch = async (url, init) => {
+        const path = new URL(String(url), "https://notes.example.com").pathname;
+        paths.push(path);
+        if (path === "/api/v1/ai/direct-target") {
+          return Response.json({ provider: "openai-compatible", baseUrl: "http://10.20.30.40:11434/v1", modelId: "local-model" });
+        }
+        if (path === proxyPath) {
+          if (operation === "resume") expect(JSON.parse(init.body)).toEqual({ answers: [] });
+          return new Response('data: {"type":"text-delta","text":"server reply"}\n\n');
+        }
+        throw new Error(`Unexpected request: ${path}`);
+      };
+      const received = [];
+      const streamOptions = { onEvent: event => received.push(event) };
+      if (operation === "resume") await api.resumeCompanionTurn(turnId, { answers: [] }, streamOptions);
+      else await api.streamAiGeneration({ action: "summarize", title: "Note", contentMarkdown: "Body" }, streamOptions);
+      expect(paths).toEqual(["/api/v1/ai/direct-target", proxyPath]);
+      expect(received).toEqual([{ type: "text-delta", text: "server reply" }]);
+      expect(aiStreamListeners.size).toBe(0);
+    });
+  }
+
+  test("cancelling during DNS eligibility does not prepare a turn or start a generation", async () => {
+    const bridge = window.edgeeverDesktop;
+    const originalCheck = bridge.canUseAiProviderUrl;
+    const controller = new AbortController();
+    let releaseCheck;
+    let checkStarted;
+    const started = new Promise(resolve => { checkStarted = resolve; });
+    const paths = [];
+    bridge.canUseAiProviderUrl = async () => {
+      checkStarted();
+      return new Promise(resolve => { releaseCheck = resolve; });
+    };
+    globalThis.fetch = async url => {
+      paths.push(new URL(String(url), "https://notes.example.com").pathname);
+      return Response.json({ provider: "openai-compatible", baseUrl: "https://provider.example.com/v1", modelId: "model" });
+    };
+    try {
+      const generation = api.streamCompanion({ id: crypto.randomUUID(), message: "hi" }, { signal: controller.signal, onEvent: () => {} });
+      await started;
+      controller.abort();
+      releaseCheck(true);
+      await expect(generation).rejects.toThrow();
+      expect(paths).toEqual(["/api/v1/ai/direct-target"]);
+    } finally {
+      bridge.canUseAiProviderUrl = originalCheck;
+    }
+  });
+
+  for (const status of [200, 401, "network", "stream-network"]) {
+    test(`keeps public models direct with HTTP ${status}, without retrying generation on the instance`, async () => {
+      const baseUrl = `https://provider-${status}.example.com/v1`;
+      const paths = [];
+      const providerAuth = [];
+      const completed = [];
+      const turn = { id: crypto.randomUUID(), threadId: crypto.randomUUID(), response: "", process: "", tools: [], todos: [], questions: [] };
+      aiRuntime = createAiDirectRuntime({ fetchImpl: async (_url, init) => {
+        const auth = new Headers(init.headers).get("Authorization");
+        providerAuth.push(auth);
+        if (status === "network") throw new TypeError("NetworkError during provider request");
+        if (status === "stream-network") return new Response(new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"partial reply"}}]}\n\n'));
+            setTimeout(() => controller.error(new TypeError("NetworkError during provider stream")), 10);
+          },
+        }), { headers: { "Content-Type": "text/event-stream" } });
+        if (status !== 200) return Response.json({ error: { message: "Unauthorized" } }, { status });
+        return new Response([
+          'data: {"choices":[{"delta":{"content":"direct reply"}}]}',
+          'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}',
+          'data: [DONE]',
+          '',
+        ].join("\n\n"), { headers: { "Content-Type": "text/event-stream" } });
+      } });
+      globalThis.fetch = async (url, init) => {
+        const path = new URL(String(url), "https://notes.example.com").pathname;
+        paths.push(path);
+        if (path === "/api/v1/ai/direct-target") {
+          return Response.json({ provider: "openai-compatible", baseUrl, modelId: "public-model" });
+        }
+        if (path === "/api/v1/companion/turns/prepare") {
+          return Response.json({
+            turn, provider: "openai-compatible", baseUrl, modelId: "public-model", apiKey: "provider-key",
+            instructions: "Reply briefly", messages: [{ role: "user", content: "hi" }], tools: [], maxSteps: 1, maxOutputTokens: 32,
+          });
+        }
+        if (path === `/api/v1/companion/turns/${turn.id}/complete`) {
+          const body = JSON.parse(init.body);
+          completed.push(body);
+          return Response.json({ turn: { ...turn, ...body } });
+        }
+        throw new Error(`Unexpected request: ${path}`);
+      };
+      const received = [];
+      const requestFailure = status === "network";
+      const generation = api.streamCompanion({ id: turn.id, message: "hi" }, { onEvent: event => received.push(event) });
+      if (requestFailure) await expect(generation).rejects.toThrow(/NetworkError/);
+      else await generation;
+      expect(paths).toEqual([
+        "/api/v1/ai/direct-target", "/api/v1/companion/turns/prepare",
+        ...(requestFailure ? [] : [`/api/v1/companion/turns/${turn.id}/complete`]),
+      ]);
+      expect(providerAuth).toEqual(["Bearer provider-key"]);
+      expect(completed).toHaveLength(requestFailure ? 0 : 1);
+      if (!requestFailure) expect(completed[0].status).toBe(status === 200 ? "completed" : "failed");
+      if (status === 200) expect(received).toContainEqual({ type: "text-delta", text: "direct reply" });
+      else if (status === "stream-network") expect(received).toContainEqual({ type: "text-delta", text: "partial reply" });
+      else if (status === 401) expect(received.at(-1)).toMatchObject({ type: "error", code: "ai_credentials_rejected" });
+      expect(aiStreamListeners.size).toBe(0);
+    });
+  }
+});
 
 describe("desktop instance setup", () => {
   test("can retry with a valid URL after invalid input", async () => {

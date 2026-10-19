@@ -20,19 +20,13 @@ struct MemoDetailView: View {
     @State private var imageExportDocumentPayload: MemoImageExportDocumentPayload?
     @State private var imageExportMessage: MemoImageExportMessage?
     @State private var imageExporting = false
+    @State private var imageFontStatus = "ready"
+    @State private var imageFontRecoveryId: String?
+    @State private var imageFontsRecovered = false
+    @State private var retryImageFonts: (() -> Void)?
     @State private var imageExportRequestId: String?
     @State private var imageExportBuffer = MemoImageExportBuffer()
     @State private var imageShareOptionsOpen = false
-    @State private var imageShareFormat = "png"
-    @State private var imageShareTheme = "mint"
-    @State private var imageShareFontStyle = "auto"
-    @State private var imageShareFontSize = "lg"
-    @State private var imageShareCardWidth = "wide"
-    @State private var imageShareTitle = true
-    @State private var imageShareNotebook = false
-    @State private var imageShareTags = false
-    @State private var imageShareUpdatedAt = true
-    @State private var imageShareBranding = true
     @State private var imageExportIntent: MemoImageExportIntent = .share
     @State private var error: String?
     @State private var conflictItem: OutboxItem?
@@ -56,7 +50,8 @@ struct MemoDetailView: View {
     @State private var initialShareImageHandled = false
 
     var body: some View {
-        VStack(spacing: 0) {
+        @Bindable var preferences = env.preferences
+        return VStack(spacing: 0) {
             detailHeader
             if syncStatus == .conflict, memo != nil {
                 conflictBanner
@@ -150,13 +145,22 @@ struct MemoDetailView: View {
                 imageExportDocumentPayload = nil
             }
         }
-        .sheet(item: $imageExportPreviewPayload) { payload in
+        .sheet(item: $imageExportPreviewPayload, onDismiss: {
+            imageFontRecoveryId = nil
+            retryImageFonts = nil
+            if let requestId = imageExportRequestId { imageExportBuffer.cancel(requestId: requestId) }
+            imageExportRequestId = nil
+            imageExporting = false
+        }) { payload in
+            let currentPayload = imageExportPreviewPayload ?? payload
             MemoImageExportPreviewView(
-                payload: payload,
+                payload: currentPayload,
+                isLoadingFonts: imageExporting,
+                onRetryFonts: { retryImageFonts?() },
                 isEnglish: env.preferences.isEnglish,
                 isPolish: env.preferences.uiLanguage == .polish,
                 onCopy: {
-                    guard let image = UIImage(contentsOfFile: payload.url.path) else {
+                    guard let image = UIImage(contentsOfFile: currentPayload.url.path) else {
                         imageExportMessage = MemoImageExportMessage(
                             title: env.preferences.t("复制失败", en: "Copy failed", pl: "Nie udało się skopiować"),
                             message: env.preferences.t("无法读取生成的图片。", en: "The generated image could not be read.", pl: "Nie udało się odczytać wygenerowanego obrazu.")
@@ -170,15 +174,17 @@ struct MemoDetailView: View {
                     )
                 },
                 onSave: {
+                    imageFontRecoveryId = nil
                     imageExportPreviewPayload = nil
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                        imageExportDocumentPayload = MemoImageExportDocumentPayload(url: payload.url)
+                        imageExportDocumentPayload = MemoImageExportDocumentPayload(url: currentPayload.url)
                     }
                 },
                 onShare: {
+                    imageFontRecoveryId = nil
                     imageExportPreviewPayload = nil
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                        imageExportSharePayload = MemoImageExportSharePayload(url: payload.url)
+                        imageExportSharePayload = MemoImageExportSharePayload(url: currentPayload.url)
                     }
                 }
             )
@@ -187,28 +193,49 @@ struct MemoDetailView: View {
             NavigationStack {
                 Form {
                     Section(env.preferences.t("主题风格", en: "Theme", pl: "Motyw")) {
-                        Picker(env.preferences.t("主题风格", en: "Theme", pl: "Motyw"), selection: $imageShareTheme) {
-                            Text(env.preferences.t("纯白", en: "Pure White", pl: "Czysta biel")).tag("slate")
-                            Text(env.preferences.t("薄荷", en: "Mint", pl: "Mięta")).tag("mint")
-                            Text(env.preferences.t("极光渐变", en: "Aurora", pl: "Zorza")).tag("aurora")
-                            Text(env.preferences.t("暮色晚霞", en: "Sunset", pl: "Zachód słońca")).tag("sunset")
-                            Text(env.preferences.t("黑白编辑", en: "Black & White", pl: "Czerń i biel")).tag("editorial")
-                            Text(env.preferences.t("极客终端", en: "Terminal", pl: "Terminal")).tag("terminal")
-                            Text(env.preferences.t("书页", en: "Book Page", pl: "Strona książki")).tag("film")
+                        Picker(env.preferences.t("主题风格", en: "Theme", pl: "Motyw"), selection: Binding(
+                            get: { preferences.noteImageShare.theme },
+                            set: { theme in
+                                var share = preferences.noteImageShare
+                                share.theme = theme
+                                share.fontStyle = "auto"
+                                preferences.noteImageShare = share
+                            }
+                        )) {
+                            Text(env.preferences.t("透明", en: "Glass", pl: "Szkło")).tag("glass")
+                            Text(env.preferences.t("金句", en: "Quote", pl: "Cytat")).tag("quote")
+                            Text(env.preferences.t("书摘", en: "Book excerpt", pl: "Fragment książki")).tag("book")
+                            Text(env.preferences.t("备忘录", en: "Memo", pl: "Notatka")).tag("memo")
+                            Text(env.preferences.t("便当", en: "Bento", pl: "Bento")).tag("bento")
+                            Text(env.preferences.t("黑日", en: "Black Sun", pl: "Czarne słońce")).tag("black-sun")
+                            Text(env.preferences.t("框界", en: "Frame", pl: "Ramka")).tag("frame")
+                            Text(env.preferences.t("手写", en: "Handwritten", pl: "Pismo odręczne")).tag("handwritten")
+                            Text(env.preferences.t("代码", en: "Code", pl: "Kod")).tag("code")
                         }
                         .pickerStyle(.menu)
                     }
                     Section(env.preferences.t("字体风格", en: "Typography", pl: "Typografia")) {
-                        Picker(env.preferences.t("字体风格", en: "Typography", pl: "Typografia"), selection: $imageShareFontStyle) {
-                            Text(env.preferences.t("跟随主题", en: "Follow Theme", pl: "Zgodnie z motywem")).tag("auto")
-                            Text(env.preferences.t("文艺衬线", en: "Serif", pl: "Szeryfowa")).tag("serif")
-                            Text(env.preferences.t("现代无衬线", en: "Sans", pl: "Bezszeryfowa")).tag("sans")
-                            Text(env.preferences.t("极客等宽", en: "Mono", pl: "Monospace")).tag("mono")
+                        NavigationLink {
+                            NoteImageFontPickerView()
+                        } label: {
+                            HStack {
+                                Text(env.preferences.t("字体风格", en: "Typography", pl: "Typografia"))
+                                Spacer()
+                                Text(NoteImageFontPickerOptions.label(preferences))
+                                    .foregroundStyle(.secondary)
+                                    .multilineTextAlignment(.trailing)
+                            }
                         }
-                        .pickerStyle(.menu)
+                        Text(env.preferences.t(
+                            "下载型字体首次使用需联网并缓存；普惠体等推荐字体使用完整文件，首次下载较大。",
+                            en: "Downloadable fonts need a connection on first use and are cached. PuHuiTi and other recommended fonts use larger, complete original files.",
+                            pl: "Czcionki są pobierane przy pierwszym użyciu i zapisywane lokalnie. PuHuiTi i inne polecane czcionki używają większych, pełnych plików."
+                        ))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                     }
                     Section(env.preferences.t("字号大小", en: "Font size", pl: "Rozmiar czcionki")) {
-                        Picker(env.preferences.t("字号大小", en: "Font size", pl: "Rozmiar czcionki"), selection: $imageShareFontSize) {
+                        Picker(env.preferences.t("字号大小", en: "Font size", pl: "Rozmiar czcionki"), selection: $preferences.noteImageShare.fontSize) {
                             Text(env.preferences.t("紧凑", en: "Compact", pl: "Kompaktowy")).tag("sm")
                             Text(env.preferences.t("标准", en: "Standard", pl: "Standardowy")).tag("md")
                             Text(env.preferences.t("舒适", en: "Comfortable", pl: "Wygodny")).tag("lg")
@@ -216,7 +243,7 @@ struct MemoDetailView: View {
                         .pickerStyle(.segmented)
                     }
                     Section(env.preferences.t("卡片宽度", en: "Card width", pl: "Szerokość karty")) {
-                        Picker(env.preferences.t("卡片宽度", en: "Card width", pl: "Szerokość karty"), selection: $imageShareCardWidth) {
+                        Picker(env.preferences.t("卡片宽度", en: "Card width", pl: "Szerokość karty"), selection: $preferences.noteImageShare.cardWidth) {
                             Text(env.preferences.t("紧凑", en: "Compact", pl: "Kompaktowy")).tag("compact")
                             Text(env.preferences.t("标准", en: "Standard", pl: "Standardowy")).tag("standard")
                             Text(env.preferences.t("宽屏", en: "Wide", pl: "Szeroka")).tag("wide")
@@ -224,14 +251,14 @@ struct MemoDetailView: View {
                         .pickerStyle(.segmented)
                     }
                     Section(env.preferences.t("显示内容", en: "Content elements", pl: "Elementy treści")) {
-                        Toggle(env.preferences.t("笔记标题", en: "Note title", pl: "Tytuł notatki"), isOn: $imageShareTitle)
-                        Toggle(env.preferences.t("笔记本", en: "Notebook", pl: "Notatnik"), isOn: $imageShareNotebook)
-                        Toggle(env.preferences.t("标签", en: "Tags", pl: "Tagi"), isOn: $imageShareTags)
-                        Toggle(env.preferences.t("更新时间", en: "Updated time", pl: "Czas aktualizacji"), isOn: $imageShareUpdatedAt)
-                        Toggle(env.preferences.t("EdgeEver 品牌标识", en: "EdgeEver branding", pl: "Oznaczenie EdgeEver"), isOn: $imageShareBranding)
+                        Toggle(env.preferences.t("笔记标题", en: "Note title", pl: "Tytuł notatki"), isOn: $preferences.noteImageShare.showTitle)
+                        Toggle(env.preferences.t("笔记本", en: "Notebook", pl: "Notatnik"), isOn: $preferences.noteImageShare.showNotebook)
+                        Toggle(env.preferences.t("标签", en: "Tags", pl: "Tagi"), isOn: $preferences.noteImageShare.showTags)
+                        Toggle(env.preferences.t("更新时间", en: "Updated time", pl: "Czas aktualizacji"), isOn: $preferences.noteImageShare.showUpdatedAt)
+                        Toggle(env.preferences.t("EdgeEver 品牌标识", en: "EdgeEver branding", pl: "Oznaczenie EdgeEver"), isOn: $preferences.noteImageShare.showBranding)
                     }
                     Section(env.preferences.t("图片格式", en: "Image format", pl: "Format obrazu")) {
-                        Picker(env.preferences.t("图片格式", en: "Image format", pl: "Format obrazu"), selection: $imageShareFormat) {
+                        Picker(env.preferences.t("图片格式", en: "Image format", pl: "Format obrazu"), selection: $preferences.noteImageShare.format) {
                             Text(env.preferences.t("PNG · 超清无损", en: "PNG · Best for text", pl: "PNG · Najlepszy do tekstu")).tag("png")
                             Text(env.preferences.t("JPEG · 体积小", en: "JPEG · Smaller file", pl: "JPEG · Mniejszy plik")).tag("jpeg")
                         }
@@ -250,22 +277,30 @@ struct MemoDetailView: View {
                             imageShareOptionsOpen = false
                             exportMemoImage(
                                 memo,
-                                format: imageShareFormat,
-                                theme: imageShareTheme,
-                                fontStyle: imageShareFontStyle,
-                                fontSize: imageShareFontSize,
-                                cardWidth: imageShareCardWidth,
-                                showTitle: imageShareTitle,
-                                showNotebook: imageShareNotebook,
-                                showTags: imageShareTags,
-                                showUpdatedAt: imageShareUpdatedAt,
-                                showBranding: imageShareBranding,
+                                format: env.preferences.noteImageShare.format,
+                                theme: env.preferences.noteImageShare.theme,
+                                fontStyle: env.preferences.noteImageShare.fontStyle,
+                                fontSize: env.preferences.noteImageShare.fontSize,
+                                cardWidth: env.preferences.noteImageShare.cardWidth,
+                                showTitle: env.preferences.noteImageShare.showTitle,
+                                showNotebook: env.preferences.noteImageShare.showNotebook,
+                                showTags: env.preferences.noteImageShare.showTags,
+                                showUpdatedAt: env.preferences.noteImageShare.showUpdatedAt,
+                                showBranding: env.preferences.noteImageShare.showBranding,
                                 intent: .preview
                             )
                         }
                         .disabled(imageExporting || !bodyReady || memo == nil)
                     }
                 }
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if imageExporting && imageExportPreviewPayload == nil {
+                ProgressView(imageFontStatus == "loading"
+                    ? env.preferences.t("字体加载中…", en: "Loading font…", ja: "フォントを読み込み中…", pl: "Ładowanie czcionki…")
+                    : env.preferences.t("正在生成图片…", en: "Generating image…", ja: "画像を生成中…", pl: "Generowanie obrazu…"))
+                    .padding().background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12)).padding()
             }
         }
         .alert(item: $imageExportMessage) { message in
@@ -404,6 +439,8 @@ struct MemoDetailView: View {
                 imageExportBuffer.cancel(requestId: requestId)
             }
             imageExportRequestId = nil
+            imageFontRecoveryId = nil
+            retryImageFonts = nil
             imageExporting = false
         }
         .onChange(of: bodyReady) { _, _ in
@@ -1201,7 +1238,7 @@ struct MemoDetailView: View {
         fontStyle: String = "auto",
         fontSize: String = "lg",
         cardWidth: String = "wide",
-        showTitle: Bool = true,
+        showTitle: Bool = false,
         showNotebook: Bool = false,
         showTags: Bool = false,
         showUpdatedAt: Bool = true,
@@ -1212,6 +1249,14 @@ struct MemoDetailView: View {
         let requestId = UUID().uuidString
         imageExportBuffer.start(requestId: requestId)
         imageExportRequestId = requestId
+        imageFontRecoveryId = requestId
+        imageFontsRecovered = false
+        imageFontStatus = "loading"
+        retryImageFonts = {
+            exportMemoImage(memo, format: format, theme: theme, fontStyle: fontStyle, fontSize: fontSize,
+                cardWidth: cardWidth, showTitle: showTitle, showNotebook: showNotebook, showTags: showTags,
+                showUpdatedAt: showUpdatedAt, showBranding: showBranding, intent: .preview)
+        }
         imageExportIntent = intent
         imageExporting = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 60) {
@@ -1263,6 +1308,17 @@ struct MemoDetailView: View {
     }
 
     private func handleImageExportEvent(_ event: [String: Any]) {
+        if event["type"] as? String == "imageExportFontsReady" {
+            guard event["requestId"] as? String == imageFontRecoveryId else { return }
+            imageFontsRecovered = true
+            if !imageExporting, imageExportPreviewPayload?.fontFallback == true { retryImageFonts?() }
+            return
+        }
+        if event["type"] as? String == "imageExportFontStatus" {
+            guard event["requestId"] as? String == imageExportRequestId else { return }
+            imageFontStatus = event["status"] as? String ?? "ready"
+            return
+        }
         switch imageExportBuffer.accept(event) {
         case .none:
             break
@@ -1297,18 +1353,27 @@ struct MemoDetailView: View {
             imageExporting = false
             do {
                 let directory = FileManager.default.temporaryDirectory.appendingPathComponent("EdgeEverNoteExports", isDirectory: true)
+                    .appendingPathComponent(UUID().uuidString, isDirectory: true)
                 try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
                 let safeFilename = (filename as NSString).lastPathComponent
                 let url = directory.appendingPathComponent(safeFilename)
                 try data.write(to: url, options: .atomic)
-                if imageExportIntent == .preview {
+                if imageExportIntent == .preview || metadata.fontFallback {
                     imageExportPreviewPayload = MemoImageExportPreviewPayload(
+                        id: imageExportPreviewPayload?.id ?? UUID(),
+                        fontFallback: metadata.fontFallback,
                         url: url,
                         width: metadata.width,
                         height: metadata.height,
                         totalImages: metadata.totalImages,
                         failedImages: metadata.failedImages
                     )
+                    if metadata.fontFallback, imageFontsRecovered {
+                        let recoveryId = imageFontRecoveryId
+                        DispatchQueue.main.async {
+                            if imageFontRecoveryId == recoveryId, imageExportPreviewPayload != nil { retryImageFonts?() }
+                        }
+                    }
                 } else {
                     imageExportSharePayload = MemoImageExportSharePayload(url: url)
                 }
@@ -1334,7 +1399,8 @@ private struct MemoImageExportSharePayload: Identifiable {
 }
 
 private struct MemoImageExportPreviewPayload: Identifiable {
-    let id = UUID()
+    let id: UUID
+    let fontFallback: Bool
     let url: URL
     let width: Int
     let height: Int
@@ -1361,6 +1427,8 @@ private struct MemoImageExportMessage: Identifiable {
 private struct MemoImageExportPreviewView: View {
     @Environment(\.dismiss) private var dismiss
     let payload: MemoImageExportPreviewPayload
+    let isLoadingFonts: Bool
+    let onRetryFonts: () -> Void
     let isEnglish: Bool
     var isPolish: Bool = false
     let onCopy: () -> Void
@@ -1383,6 +1451,16 @@ private struct MemoImageExportPreviewView: View {
                                 isPolish ? "Podgląd niedostępny" : (isEnglish ? "Preview unavailable" : "无法预览"),
                                 systemImage: "photo.badge.exclamationmark"
                             )
+                        }
+                        if payload.fontFallback || isLoadingFonts {
+                            if isLoadingFonts {
+                                ProgressView(isPolish ? "Ładowanie czcionki…" : (isEnglish ? "Loading font…" : "字体加载中…"))
+                            } else {
+                                warning(isPolish
+                                    ? "Tymczasowo używane są czcionki zastępcze. Po załadowaniu oryginalne czcionki zostaną przywrócone automatycznie."
+                                    : (isEnglish ? "Temporarily using substitute fonts. The original fonts will be restored automatically when loaded." : "暂时使用替代字体，加载成功后将自动恢复"))
+                                Button(isPolish ? "Ponów próbę" : (isEnglish ? "Retry" : "重试"), action: onRetryFonts)
+                            }
                         }
                         if payload.failedImages > 0 {
                             warning(
@@ -1477,6 +1555,7 @@ private struct MemoImageDocumentExportView: UIViewControllerRepresentable {
 
 private final class MemoImageExportBuffer {
     struct Metadata {
+        let fontFallback: Bool
         let width: Int
         let height: Int
         let totalImages: Int
@@ -1526,6 +1605,7 @@ private final class MemoImageExportBuffer {
               let data = Data(base64Encoded: chunks.joined())
         else { return .failure("Image export returned invalid data") }
         let metadata = Metadata(
+            fontFallback: event["fontFallback"] as? Bool ?? false,
             width: (event["width"] as? NSNumber)?.intValue ?? 0,
             height: (event["height"] as? NSNumber)?.intValue ?? 0,
             totalImages: (event["totalImages"] as? NSNumber)?.intValue ?? 0,

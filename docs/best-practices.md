@@ -17,6 +17,8 @@ A curated collection of practical workflows, showcase examples, and real-world s
 - [12. AI-Powered Generation of Professional Infographics](#12-ai-powered-generation-of-professional-infographics)
 - [13. Instant Multi-Dimensional Database Table Generation via AI Prompt](#13-instant-multi-dimensional-database-table-generation-via-ai-prompt)
 - [14. One-Click Public Online Form Collection from Database Tables](#14-one-click-public-online-form-collection-from-database-tables)
+- [15. Connecting Local Agents via ACP for Note Interaction & Co-pilot](#15-connecting-local-agents-via-acp-for-note-interaction--co-pilot)
+- [16. One-Click Social Media Poster & Cover Design from Notes](#16-one-click-social-media-poster--cover-design-from-notes)
 
 ---
 
@@ -96,11 +98,17 @@ Paste directly into the WeChat Official Account article editor: tables, callout 
 
 EdgeEver's built-in AI RSS subscription capability automatically aggregates industry briefings, filters noise, and compiles structured, high-signal daily digest notes.
 
-Paired with the **"Share as Image"** (分享为图片) feature, you can customize across 8 refined themes, serif/monospace typography, card widths, and display fields—exporting crisp long image posters to clipboard or disk for social and community sharing.
+Paired with the **"Share as Image"** (分享为图片) feature, you can customize across 8 refined themes (such as Book Excerpt, Memo, Bento, Black & White, Frame, Code, and more), serif/monospace typography, card widths, and display fields—exporting crisp long image posters to clipboard or disk for social and community sharing.
 
 | 1. Auto-generated RSS daily & select "Share as Image" | 2. Customize theme, typography & card layout | 3. Crisp exported image poster |
 | :---: | :---: | :---: |
 | ![EdgeEver note menu select Share as Image](assets/best-practices/rss-daily-menu-share-image.png) | ![EdgeEver share as image configuration modal](assets/best-practices/rss-daily-poster-modal.png) | ![Exported high-res RSS daily image poster](assets/best-practices/rss-daily-exported-poster.png) |
+
+For code snippets, tech notes, and developer thoughts, switch to the dedicated "Code" theme to generate aesthetic technical cards complete with macOS window controls, line numbers, and monospace typography:
+
+| "Code" theme configuration and preview |
+| :---: |
+| ![EdgeEver Share as Image code theme preview](assets/best-practices/note-export-code-theme.png) |
 
 ---
 
@@ -187,3 +195,28 @@ Respondents can fill out and submit responses on mobile or desktop browsers with
 | ![Click Form Collection button in database header](assets/best-practices/database-form-collection-btn.png) | ![Public online form submission webpage](assets/best-practices/database-public-form-page.png) |
 
 ---
+
+## 15. Connecting Local Agents via ACP for Note Interaction & Co-pilot
+
+EdgeEver deeply integrates the **Agent Client Protocol (ACP)**, enabling the desktop app to seamlessly bridge with advanced locally running agents (including Codex, DeepSeek Harness, Claude Code, Antigravity, OpenClaw, WorkBuddy, Hermes Agent, and more).
+
+Once connected via ACP, EdgeEver securely grants the local agent read and write access to notes within the current workspace. Without ever leaving your notes, you can converse directly with your local agent in the right-side companion sidebar for deep code reasoning, note summarization, multi-step analysis, and workspace-wide knowledge retrieval.
+
+| 1. Connect local agent clients (ACP) in Settings | 2. Collaborate directly with local agents in sidebar |
+| :---: | :---: |
+| ![Connect local agent (ACP) client list in settings](assets/best-practices/acp-support-list.png) | ![AI companion sidebar interacting with local agent](assets/best-practices/acp-support-list-dialog.png) |
+
+---
+
+## 16. One-Click Social Media Poster & Cover Design from Notes
+
+Click **"Create Poster"** (制作海报) in any note menu (or via "New → Poster") to instantly transform note titles, key quotes, and highlights into the **EdgeEver Poster Design Studio**.
+
+The studio provides 40+ professionally crafted social media poster templates (such as Editorial Headline, Creator Notes, Impact Words, Neon Title, and more), fully optimized for Xiaohongshu 3:4, Moments, and landscape social formats. You can effortlessly customize typography, colors, and geometric elements on the visual canvas, then copy or export high-resolution PNGs in one click to turn written knowledge into captivating visual posts.
+
+| Transform notes into posters with 40+ professional social media templates |
+| :---: |
+| ![EdgeEver Poster Design Studio and template library](assets/best-practices/poster-design-templates.png) |
+
+---
+

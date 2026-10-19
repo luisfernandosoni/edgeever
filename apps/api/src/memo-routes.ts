@@ -1,5 +1,6 @@
 import {
   DeleteMemosSchema,
+  DuplicateMemoSchema,
   MemoCreateSchema,
   MergeMemosSchema,
   MemoUpdateSchema,
@@ -73,6 +74,13 @@ type MemoRouteDependencies = {
     limit: number,
   ) => Promise<MemoRevision[]>;
   listMemos: (database: DatabaseAdapter, input: ListMemosInput) => Promise<ListMemosResult>;
+  duplicateMemo: (
+    context: AppContext,
+    memoId: string,
+    input: { notebookId?: string; title?: string },
+    actor: AuditActor,
+    actorLabel: string,
+  ) => Promise<MemoDetail>;
   mergeMemos: (
     database: DatabaseAdapter,
     workspaceId: string,
@@ -172,7 +180,11 @@ export const registerMemoRoutes = (
     const file = form.get("file");
     const notebookId = typeof form.get("notebookId") === "string" ? String(form.get("notebookId")).trim() : "";
     const title = typeof form.get("title") === "string" ? String(form.get("title")) : "";
-    const contentMarkdown = typeof form.get("contentMarkdown") === "string" ? String(form.get("contentMarkdown")) : "";
+    // multipart/form-data encodes line breaks in text fields as CRLF (browsers
+    // always, and newer Bun versions too), while notes store LF line breaks.
+    const contentMarkdown = typeof form.get("contentMarkdown") === "string"
+      ? String(form.get("contentMarkdown")).replace(/\r\n?/g, "\n")
+      : "";
     let tags: string[] = [];
     const tagsValue = form.get("tags");
     if (typeof tagsValue === "string" && tagsValue.trim()) {
@@ -400,6 +412,24 @@ export const registerMemoRoutes = (
         getAuditActor(context),
       );
       return context.json({ memo });
+    } catch (error) {
+      return handleAppError(context, error);
+    }
+  });
+
+  app.post("/api/v1/memos/:id/duplicate", zValidator("json", DuplicateMemoSchema), async (context) => {
+    const denied = requireScopes(context, "write:memos");
+    if (denied) return denied;
+
+    try {
+      const memo = await dependencies.duplicateMemo(
+        context,
+        context.req.param("id"),
+        context.req.valid("json"),
+        getAuditActor(context),
+        getActorLabel(context),
+      );
+      return context.json({ memo }, 201);
     } catch (error) {
       return handleAppError(context, error);
     }

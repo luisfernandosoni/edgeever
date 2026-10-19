@@ -1,0 +1,4 @@
+{
+  "extends": "../../tsconfig.json",
+  "include": ["./*.browser.tsx", "./*.ts", "../../apps/web/src/vite-env.d.ts"]
+}
