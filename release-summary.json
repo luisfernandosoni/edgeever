@@ -1,35 +1,26 @@
 {
-  "version": "1.125.0",
+  "version": "2.2.0",
   "changes": {
     "en-US": [
-      "Support SVG image uploads, previews, and sharing.",
-      "Improve AI poster template selection, speed up template thumbnails, and allow retrying failed previews.",
-      "Fix consecutive mobile shares being combined into one note and Android image export failures for filenames containing brackets.",
-      "Fix keyboard shortcut switching between source and rich-text editor modes. Thanks to @sivdead (#623).",
-      "Fix extra brackets and long links beside clipped Substack images and improve GitHub repository metadata capture. Update the clipper extension and re-clip Substack articles to apply the fix. Thanks to @sivdead (#618).",
-      "Fix desktop access to AI models on the server local network by routing models restricted from direct access through the instance server. Thanks to @sivdead (#624).",
-      "Keep note context menus within the window boundaries.",
-      "Fix Markdown line breaks in untouched initial welcome notes."
+      "Public notebook sites now include an outline for long notes, full-text search, and per-site settings for the address alias, home note, appearance, and search indexing. Authors can exclude individual notes from a site. Existing share links, passwords, and live updates stay in place. Self-hosted instances apply the database migration on startup, so back up before upgrading. Thanks @sivdead for #634.",
+      "Note lists can sort titles from Z to A on the web, Android, iOS, and desktop. Pinned notes stay first, and notes that share a title keep their previous order.",
+      "A local agent keeps its thinking visible until the answer starts.",
+      "Follow-up messages in a desktop sidebar chat stay on the local agent that is already running, instead of starting a new process and session each time.",
+      "Resuming an interrupted companion chat no longer asks questions that were already answered. Thanks @yulei666 for #638."
     ],
     "zh-CN": [
-      "支持 SVG 图片上传、预览和分享。",
-      "改进 AI 海报模板选择，加快模板缩略图加载，并支持加载失败后重试。",
-      "修复移动端连续分享混入同一笔记的问题，以及 Android 图片导出文件名含方括号时的失败。",
-      "修复编辑器源码与富文本模式的快捷键往返切换。感谢 @sivdead（#623）。",
-      "修复 Substack 剪藏图片旁多余括号和长链接，以及 GitHub 仓库信息提取；Substack 修复需更新剪藏扩展后重新剪藏。感谢 @sivdead（#618）。",
-      "修复桌面端无法调用服务器局域网 AI 模型的问题，受直连限制的模型改由实例服务器调用。感谢 @sivdead（#624）。",
-      "修复笔记右键菜单超出窗口边界的问题。",
-      "修复未编辑的初始欢迎笔记中 Markdown 换行显示异常。"
+      "公开笔记本站点现在可以显示长文目录、搜索正文，并按站点设置访问别名、首页、外观和是否允许收录。作者可以把单篇笔记从某个站点排除。原有分享链接、密码和实时更新保持不变。自托管实例会在启动时自动迁移数据库，升级前请先备份。感谢 @sivdead 的贡献（#634）。",
+      "笔记列表可以按标题从 Z 到 A 排序，Web、Android、iOS 和桌面端都可用。置顶笔记仍在最前，标题相同的笔记保持原来的次序。",
+      "本机 Agent 会一直显示思考过程，直到回答开始。",
+      "在桌面端侧栏里继续和同一个本机 Agent 对话时，会沿用已经启动的进程，不用每次重新打开会话。",
+      "中断后继续的随身助手对话，不会再弹出已经回答过的问题。感谢 @yulei666 的贡献（#638）。"
     ],
     "ja": [
-      "SVG 画像のアップロード、プレビュー、共有に対応しました。",
-      "AI によるポスターテンプレート選択を改善し、サムネイルの表示を高速化しました。読み込み失敗時に再試行できます。",
-      "モバイルで連続共有した内容が同じノートに混在する問題と、Android で角括弧を含む画像ファイル名の書き出し失敗を修正しました。",
-      "ソースとリッチテキスト間のショートカット切り替えを修正しました。@sivdead さんに感謝します（#623）。",
-      "Substack のクリップ画像横に余分な括弧と長いリンクが出る問題と、GitHub リポジトリ情報の取得を修正しました。Substack の修正には拡張機能の更新と再クリップが必要です。@sivdead さんに感謝します（#618）。",
-      "デスクトップからサーバーのローカルネットワーク上の AI モデルを利用できない問題を修正し、直接アクセスが制限されるモデルはインスタンスサーバー経由で呼び出します。@sivdead さんに感謝します（#624）。",
-      "ノートのコンテキストメニューがウィンドウの外にはみ出す問題を修正しました。",
-      "未編集の初期ウェルカムノートで Markdown の改行が正しく表示されない問題を修正しました。"
+      "公開ノートブックサイトに、長文の見出しナビ、本文検索、サイトごとのアドレス別名・ホーム・外観・検索インデックス設定を追加しました。サイトごとに個別のノートを除外できます。既存の共有リンク、パスワード、リアルタイム更新はそのままです。セルフホスト版は起動時にデータベースを移行するので、アップグレード前にバックアップしてください。@sivdead さんの貢献（#634）に感謝します。",
+      "ノート一覧をタイトルの Z から A の順に並べられるようになりました。Web、Android、iOS、デスクトップで使えます。ピン留めしたノートは先頭のまま、同じタイトルの順序も従来どおりです。",
+      "ローカル Agent は、回答が始まるまで思考過程を表示し続けます。",
+      "デスクトップのサイドバーで同じローカル Agent に続けて送るメッセージは、起動済みのプロセスを使い、毎回新しいセッションを開かなくなりました。",
+      "中断したコンパニオンの会話を再開しても、すでに回答した質問は再度表示されません。@yulei666 さんの貢献（#638）に感謝します。"
     ]
   }
 }

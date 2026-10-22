@@ -56,7 +56,7 @@ import { normalizeUpdateProgress } from "./update-progress.mjs";
 import { inspectWindowsTaskbarShortcuts } from "./windows-taskbar-diagnostics.mjs";
 import { testPicGoConnection, createPicGoUploadQueue } from "./picgo.mjs";
 import { createPluginPublicNetworkRuntime } from "./plugin-public-network.mjs";
-import { canUseAiProviderUrl, createAiDirectRuntime } from "./ai-direct.mjs";
+import { createAiDirectRuntime } from "./ai-direct.mjs";
 import { createAcpPathStore, validateTrustedAcpPath } from "./acp-path-store.mjs";
 import { createAcpHostRuntime, registerAcpIpc } from "./acp-host.mjs";
 import { shouldQuitAfterAllWindowsClosed } from "./window-lifecycle.mjs";
@@ -146,6 +146,7 @@ let windowsDownloadedUpdateVerified = false;
 let sidecarScopeKey = "anonymous";
 let activeAccountId = null;
 let shutdownCleanupStarted = false;
+let releaseDesktopAcpSessions = async () => {};
 let sidecarRestartTimer = null;
 let sidecarRestartAttempts = 0;
 let sidecarRestartInFlight = false;
@@ -155,7 +156,9 @@ let rendererStartupFailureDialogOpen = false;
 let rendererStartupGuard = null;
 let rendererUnresponsiveTimer = null;
 const pluginPublicNetwork = createPluginPublicNetworkRuntime();
-const aiDirect = createAiDirectRuntime();
+const aiDirect = createAiDirectRuntime({
+  fetchImpl: (url, init) => net.fetch(url, { ...init, credentials: "omit" }),
+});
 let rendererUnresponsiveDialogOpen = false;
 let recoveredAfterAbnormalExit = false;
 let usePrivateAppProtocol = false;
@@ -1814,12 +1817,8 @@ const startApplication = async () => {
   ipcMain.on("desktop:cancel-public-network-fetch", (event, requestId) => {
     if (event.sender === mainWindow?.webContents && typeof requestId === "string") pluginPublicNetwork.cancel(requestId);
   });
-  ipcMain.handle("desktop:ai-direct-check", async (event, url) => {
-    if (event.sender !== mainWindow?.webContents) throw new Error("AI provider requests must come from the main window");
-    return canUseAiProviderUrl(url);
-  });
   ipcMain.handle("desktop:ai-direct-open", async (event, requestId, input) => {
-    if (event.sender !== mainWindow?.webContents) throw new Error("AI provider requests must come from the main window");
+    if (event.sender !== mainWindow?.webContents || event.senderFrame !== event.sender.mainFrame) throw new Error("AI provider requests must come from the main window");
     const sender = event.sender;
     return aiDirect.open(requestId, input, {
       onData: (bytes) => {
@@ -1840,7 +1839,7 @@ const startApplication = async () => {
     });
   });
   ipcMain.on("desktop:ai-direct-cancel", (event, requestId) => {
-    if (event.sender === mainWindow?.webContents && typeof requestId === "string") aiDirect.cancel(requestId);
+    if (event.sender === mainWindow?.webContents && event.senderFrame === event.sender.mainFrame && typeof requestId === "string") aiDirect.cancel(requestId);
   });
   const acpRuntime = registerAcpIpc(ipcMain, createAcpHostRuntime({
     adapterStore: join(app.getPath("userData"), "acp-adapters"),
@@ -1875,6 +1874,7 @@ const startApplication = async () => {
       return validateTrustedAcpPath(selection.filePaths[0], { excludedRoot: app.getPath("userData") });
     },
   });
+  releaseDesktopAcpSessions = () => acpRuntime.releaseWarmSessions();
   await acpRuntime.pruneAdapters().catch(() => {});
   const refreshAdapters = () => { void acpRuntime.installDetected().catch(() => []).then(() => acpRuntime.updateInstalled()).catch(() => {}); };
   const firstAdapterRefresh = setTimeout(refreshAdapters, 10_000);
@@ -2265,6 +2265,7 @@ app.on("before-quit", (event) => {
   }
   tray?.destroy();
   void (async () => {
+    await releaseDesktopAcpSessions().catch(() => {});
     await stopSidecar();
     await unlink(crashMarkerPath()).catch(() => {});
     await writeDiagnostic("session.quit");

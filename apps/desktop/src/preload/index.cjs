@@ -56,7 +56,6 @@ contextBridge.exposeInMainWorld("edgeeverDesktop", Object.freeze({
   uploadPicGoImage: (input) => ipcRenderer.invoke("desktop:picgo-upload", input),
   publicNetworkFetch: (requestId, input) => ipcRenderer.invoke("desktop:public-network-fetch", requestId, input),
   cancelPublicNetworkFetch: async (requestId) => { ipcRenderer.send("desktop:cancel-public-network-fetch", requestId); },
-  canUseAiProviderUrl: url => ipcRenderer.invoke("desktop:ai-direct-check", url),
   openAiProviderStream: (requestId, input) => ipcRenderer.invoke("desktop:ai-direct-open", requestId, input),
   cancelAiProviderStream: (requestId) => { ipcRenderer.send("desktop:ai-direct-cancel", requestId); },
   onAiProviderStreamChunk: (callback) => {
@@ -69,6 +68,7 @@ contextBridge.exposeInMainWorld("edgeeverDesktop", Object.freeze({
   probeAcpAdapter: (input) => ipcRenderer.invoke("desktop:acp-probe", input),
   installAcpAdapter: (id) => ipcRenderer.invoke("desktop:acp-install", id),
   authenticateAcpAdapter: (input) => ipcRenderer.invoke("desktop:acp-authenticate", input),
+  prepareAcp: (input) => ipcRenderer.invoke("desktop:acp-prepare", input),
   promptAcp: (input) => ipcRenderer.invoke("desktop:acp-prompt", input),
   cancelAcp: (requestId) => ipcRenderer.invoke("desktop:acp-cancel", requestId),
   onAcpEvent: (callback) => {

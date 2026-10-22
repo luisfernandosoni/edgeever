@@ -20,6 +20,7 @@ test("ACP ignores caller paths on all execution channels and preserves main-owne
       listAdapters: () => [{ id: "antigravity" }],
       probeAdapter: (input) => calls.push(input),
       authenticateAdapter: (input) => calls.push(input),
+      prepare: (input) => calls.push(input),
       prompt: (input) => calls.push(input),
     };
     const register = () => {
@@ -32,7 +33,7 @@ test("ACP ignores caller paths on all execution channels and preserves main-owne
       });
       return handlers;
     };
-    const channels = ["desktop:acp-probe", "desktop:acp-authenticate", "desktop:acp-prompt"];
+    const channels = ["desktop:acp-probe", "desktop:acp-authenticate", "desktop:acp-prepare", "desktop:acp-prompt"];
     const handlers = register();
     for (const channel of channels) {
       const input = { id: "antigravity", adapterId: "antigravity", path: "/attacker/payload" };
@@ -123,9 +124,9 @@ test("legacy credentials migrate to an origin-bound record and cannot follow an 
   expect(decodeSessionCredential('{"version":99}', previous.origin).token).toBe("");
 });
 
-test("AI transport rejects mapped IPv6, trailing-dot names and non-public hostnames", async () => {
+test("AI accepts configured private endpoints while plugin DNS remains public-only", async () => {
   for (const host of ["[::ffff:127.0.0.1]", "[::ffff:169.254.169.254]", "[::ffff:10.0.0.5]", "localhost.", "service.internal", "service.local", "localhost", "127.0.0.1"]) {
-    expect(() => validateAiProviderUrl(`https://${host}/v1`)).toThrow();
+    expect(validateAiProviderUrl(`https://${host}/v1`).protocol).toBe("https:");
   }
   const lookup = createPublicLookup((_host, _options, callback) => callback(null, [{ address: "127.0.0.1", family: 4 }]));
   await expect(new Promise((resolve, reject) => lookup("provider.example.org", {}, (error, address) => error ? reject(error) : resolve(address))))
