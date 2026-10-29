@@ -1,35 +1,26 @@
 {
-  "version": "2.13.0",
+  "version": "2.14.0",
   "changes": {
     "en-US": [
-      "Insert chemical formulas and equations, and continue typing naturally after inserting or editing formulas. (#717, #719; @dkoryto, #718, #720)",
-      "Download share QR codes as PNG or SVG, with consistent PNG image dimensions. (#714; @dkoryto, #716)",
-      "Improve attachment restore and shared-resource security to prevent malicious restored content from executing scripts. (#701; @sivdead, #711)",
-      "Fix notes and nested notebooks remaining queued when their parent notebook has not synced yet. (#712)",
-      "Fix Mermaid diagrams with HTML labels in the enlarged viewer and preserve compact subgraph layouts. (#704)",
-      "Preserve the drop position while images upload, remove empty galleries after deleting all images, and refine image controls. (#707, #709)",
-      "Keep single tildes in text such as 1~2~3 instead of rendering accidental strikethrough. (#698)",
-      "Keep the Simplified Chinese default title out of untitled shared pages and link previews. (#713; @dkoryto, #715)"
+      "Move existing images within notes and reorder gallery images by dragging, with gallery controls shown on interaction. (#708)",
+      "Fix excessive blank lines when copying notes to other apps.",
+      "New desktop backup configurations retain one copy by default, with choices of 1, 3 or 5 copies; existing retention settings are preserved.",
+      "Improve clipping of dynamically loaded Instagram posts and carousel images.",
+      "Add step-by-step Instagram and GitHub repository metadata clipping examples to the best practices guide."
     ],
     "zh-CN": [
-      "支持插入化学式与化学方程式，插入或编辑公式后可顺畅继续输入。（#717、#719；@dkoryto，#718、#720）",
-      "支持将分享二维码下载为 PNG 或 SVG，PNG 图片尺寸保持一致。（#714；@dkoryto，#716）",
-      "加强附件恢复与共享资源安全校验，防止恶意恢复内容执行脚本。（#701；@sivdead，#711）",
-      "修复父笔记本尚未同步时，笔记及子笔记本持续卡在同步队列的问题。（#712）",
-      "修复含 HTML 标签的 Mermaid 图表无法放大查看的问题，并改善紧凑子图布局。（#704）",
-      "图片上传期间保留拖放插入位置，删除全部图片后移除空图库，并统一图片控件的视觉样式。（#707、#709）",
-      "保留 1~2~3 等文本中的单波浪线，避免误显示为删除线。（#698）",
-      "修复无标题分享页面及链接预览中出现简体中文默认标题的问题。（#713；@dkoryto，#715）"
+      "支持拖动笔记中已有图片及调整图库图片顺序，图库控件在交互时显示。（#708）",
+      "修复复制笔记到其他应用时出现过多空行的问题。",
+      "桌面端新备份配置默认保留 1 份，可选 1、3 或 5 份；已有配置继续使用原保留设置。",
+      "改善动态加载的 Instagram 帖子与轮播图片的剪藏效果。",
+      "最佳实践指南新增 Instagram 与 GitHub 仓库元数据剪藏示例。"
     ],
     "ja": [
-      "化学式と化学反応式を挿入でき、数式の挿入・編集後も自然に入力を続けられます。",
-      "共有QRコードをPNGまたはSVGで保存でき、PNGの画像サイズも統一されます。",
-      "添付ファイルの復元と共有リソースの安全性を強化し、不正な復元コンテンツによるスクリプト実行を防ぎます。",
-      "親ノートブックの同期前に作成したノートや子ノートブックが同期待ちのままになる問題を修正します。",
-      "HTMLラベルを含むMermaid図の拡大表示を修正し、サブグラフのコンパクトな配置を改善します。",
-      "画像アップロード中のドロップ位置を保持し、全画像削除後の空ギャラリーを除去して、画像操作の表示を整えます。",
-      "1~2~3のような単一チルダを含む文章が誤って取り消し線になる問題を修正します。",
-      "無題の共有ページやリンクプレビューに簡体字中国語の既定タイトルが表示される問題を修正します。"
+      "ノート内の既存画像の移動とギャラリー画像の並べ替えをドラッグで行え、操作時にギャラリーのコントロールを表示します。",
+      "ノートをほかのアプリへコピーした際に空行が増えすぎる問題を修正します。",
+      "デスクトップの新規バックアップ設定では既定で1世代を保持し、1・3・5世代から選択できます。既存の保持設定は維持されます。",
+      "動的に読み込まれるInstagramの投稿とカルーセル画像のクリッピングを改善します。",
+      "活用ガイドにInstagramとGitHubリポジトリのメタデータをクリッピングする手順例を追加します。"
     ]
   }
 }
