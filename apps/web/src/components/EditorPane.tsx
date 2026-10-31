@@ -611,7 +611,7 @@ const RichEditorPane = ({
   }, []);
   const noteLinkResultsQuery = useQuery({
     queryKey: ["memo-link-search", noteLinkQuery],
-    queryFn: () => repository.listMemos({ q: noteLinkQuery, limit: 20 }),
+    queryFn: () => repository.listMemos({ q: noteLinkQuery, limit: 20, includeTotal: false }),
     enabled: noteLinkPickerOpen,
   });
   const [editorScrollContainer, setEditorScrollContainer] = useState<HTMLDivElement | null>(null);
@@ -824,7 +824,7 @@ const RichEditorPane = ({
       getCurrentMemoId: () => memoRef.current?.id ?? null,
       getLabels: () => noteLinkSuggestionLabelsRef.current,
       searchMemos: async (query) => {
-        const result = await repository.listMemos({ q: query, limit: 20 });
+        const result = await repository.listMemos({ q: query, limit: 20, includeTotal: false });
         return result.memos;
       },
     });
