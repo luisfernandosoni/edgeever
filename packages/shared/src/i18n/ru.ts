@@ -1,7 +1,9 @@
+import { noteImportRu } from "./note-import";
 import { memoTemplateSeedTranslations } from "../memo-template-seeds";
 
 // Shared by the PWA and native mobile clients.
 export const ru = {
+  noteImport: noteImportRu,
   notebookAppearance: {
     inversion: "Инверсия",
     invertOff: "Выключена",
@@ -536,6 +538,7 @@ export const ru = {
     cloudflareChallenge: "Браузерная проверка Cloudflare перехватила API входа и не может выполниться на этой странице. Попросите администратора инстанса настроить правило WAF Challenge для входа.",
     securityPolicyBlocked: "Политика безопасности заблокировала запрос до EdgeEver. Попросите администратора инстанса проверить Cloudflare Security Events, Access, WAF или правила обратного прокси.",
     requestForbidden: "Инстанс отклонил запрос на вход (HTTP 403). Попросите администратора инстанса проверить политику доступа.",
+    databaseDailyQuotaExceeded: "Исчерпан суточный лимит базы данных Cloudflare D1 этого инстанса. Лимит сбрасывается в 00:00 UTC. Администратор также может перейти на платный тариф Workers.",
     instanceServerError: "Инстанс временно недоступен. Попробуйте позже.",
     requestRejected: "Инстанс отклонил запрос на вход (HTTP {{status}}). Обратитесь к администратору инстанса.",
     invalidInstanceResponse: "Это недействительный инстанс EdgeEver. Проверьте адрес инстанса.",
@@ -1179,12 +1182,33 @@ export const ru = {
       native: "Системная",
       clay: "Красный",
       dawn: "Золотой",
+      emerald: "Изумрудный",
       teal: "Бирюзовый",
       azure: "Синий",
       violet: "Фиолетовый",
       pink: "Розовый",
       slate: "Серый",
     },
+    editorBodyHeadingStyleTitle: "Стиль заголовков",
+    editorBodyHeadingStyles: {
+      default: "По умолчанию",
+      bar: "Полоса слева",
+      numbered: "Нумерованные разделы",
+    },
+    editorBodyQuoteStyleTitle: "Стиль цитат",
+    editorBodyQuoteStyles: {
+      default: "По умолчанию",
+      dashed: "Пунктирная карточка",
+      "accent-bar": "Акцентная линия",
+      "minimal-rule": "Тонкие линии",
+    },
+    editorBodyEmphasisStyleTitle: "Подчёркивание и выделение",
+    editorBodyEmphasisStyles: {
+      default: "По умолчанию",
+      marker: "Маркерное подчёркивание",
+    },
+    editorBodyMagazineCoverTitle: "Обложка и навигация",
+    editorBodyMagazineCoverDescription: "Отображать вверху статьи карточку-обложку в журнальном стиле и карточки разделов",
     editorBodyCssTitle: "Свой CSS",
     editorBodyCssDescription: "Для светлой и тёмной темы — свои правила. Размер и высота строки задаются элементами управления выше.",
     editorBodyCssPreviewLabel: "Просмотр",
@@ -1316,6 +1340,8 @@ export const ru = {
     themeToggleToLight: "Переключить на светлую тему",
     tabs: {
       general: "Основные",
+      reading: "Чтение и оформление",
+      editing: "Редактор",
       shortcuts: "Горячие клавиши",
       ai: "ИИ и интеграции",
       speech: "Расшифровка аудио и видео",
@@ -2170,7 +2196,7 @@ export const ru = {
     },
     errors: {
       backup_name_invalid: "Введите допустимое имя файла без пути, зарезервированных имён и специальных символов.",
-      backup_name_exists: "Файл с таким именем уже существует. Выберите другое имя; существующий файл не изменён.",
+      backup_name_exists: "Файл с таким именем уже существует. Повторите резервное копирование чуть позже; существующий файл не изменён.",
       backup_file_replaced: "Файл резервной копии был заменён. Действие не выполнено.",
       backup_configuration_unavailable: "Не удалось прочитать настройки или очистить временные файлы. Проверьте права доступа к папке данных приложения и перезапустите его.",
       backup_too_large: "Размер зашифрованной копии ограничен 64 ГиБ минус 32 байта. Для большего архива отключите шифрование.",
@@ -2305,6 +2331,8 @@ export const ru = {
       toggleEditorMode: { label: "Переключить режим редактора" },
       toggleOutline: { label: "Показать/скрыть структуру документа" },
       toggleSidebar: { label: "Показать или скрыть боковую панель" },
+      focusTitle: { label: "Перейти к заголовку заметки" },
+      focusBody: { label: "Перейти к тексту заметки" },
     },
   },
   quickSwitcher: {
@@ -3078,6 +3106,24 @@ export const ru = {
     publicUpdated: "Обновлено {{time}}",
     publicUnavailable: "Общая заметка недоступна",
     publicUnavailableHint: "Ссылка может быть недействительной, владелец мог её отозвать, или заметка удалена.",
+    expiryLabel: "Срок действия ссылки",
+    expiryNever: "Без срока",
+    expiry1Day: "1 день",
+    expiry7Days: "7 дней",
+    expiry30Days: "30 дней",
+    expiryCustom: "Своя дата",
+    expiryCustomLabel: "Дата окончания",
+    expiryCustomSave: "Установить дату",
+    expiryInvalid: "Выберите дату в будущем.",
+    expiresOn: "Действует до {{date}}",
+    expiredOn: "Истекла {{date}}",
+    expiredNotice: "Срок действия ссылки истёк. Посетители видят сообщение об истечении вместо заметки. Продлите срок, снимите ограничение или отзовите доступ.",
+    expiredBadge: "Истекла",
+    viewsCount: "Открытий: {{count}}",
+    viewsLast: "последнее {{date}}",
+    viewsNone: "Ещё не открывали",
+    publicExpired: "Срок действия этой ссылки истёк",
+    publicExpiredHint: "Владелец ограничил срок действия ссылки. Попросите у него новую.",
   },
   slashMenu: {
     menu: "Меню вставки",
@@ -3232,7 +3278,7 @@ export const ru = {
     empty: "Заметки не найдены",
     loading: "Поиск заметок...",
     close: "Закрыть выбор заметки",
-    openHint: "Удерживайте {{modifier}} и нажмите, чтобы открыть ссылку. Чтобы открывать ссылки одним кликом, отключите эту опцию в Профиль → Основные",
+    openHint: "Удерживайте {{modifier}} и нажмите, чтобы открыть ссылку. Чтобы открывать ссылки одним кликом, отключите эту опцию в Профиль → Редактор",
   },
   mobileNotebookPicker: {
     title: "Сменить блокнот",

@@ -1,7 +1,9 @@
+import { noteImportZhCN } from "./note-import";
 import { memoTemplateSeedTranslations } from "../memo-template-seeds";
 
 // Shared by the PWA and native mobile clients.
 export const zhCN = {
+  noteImport: noteImportZhCN,
   notebookAppearance: {
     inversion: "反转",
     invertOff: "关闭",
@@ -536,6 +538,7 @@ export const zhCN = {
     cloudflareChallenge: "Cloudflare 人机验证拦截了登录接口，当前页面无法完成该验证。请实例管理员调整针对登录接口的 WAF Challenge 规则。",
     securityPolicyBlocked: "登录请求在到达 EdgeEver 前被安全策略拦截。请实例管理员检查 Cloudflare Security Events、Access、WAF 或反向代理规则。",
     requestForbidden: "实例拒绝了登录请求（HTTP 403）。请实例管理员检查访问策略。",
+    databaseDailyQuotaExceeded: "实例的 Cloudflare D1 当日数据库额度已耗尽，额度每天在北京时间 08:00 重置。实例管理员也可升级 Workers 套餐解除此限制。",
     instanceServerError: "实例暂时出错，请稍后再试。",
     requestRejected: "实例拒绝了登录请求（HTTP {{status}}）。请联系实例管理员。",
     invalidInstanceResponse: "这个地址不是有效的 EdgeEver 实例，请检查实例地址。",
@@ -1179,12 +1182,33 @@ export const zhCN = {
       native: "原生",
       clay: "朱橙",
       dawn: "赭金",
+      emerald: "翡翠",
       teal: "碧青",
       azure: "宝蓝",
       violet: "鸢紫",
       pink: "玫粉",
       slate: "灰紫",
     },
+    editorBodyHeadingStyleTitle: "标题样式",
+    editorBodyHeadingStyles: {
+      default: "默认",
+      bar: "左竖条",
+      numbered: "编号章节",
+    },
+    editorBodyQuoteStyleTitle: "引用样式",
+    editorBodyQuoteStyles: {
+      default: "默认",
+      dashed: "虚线卡片",
+      "accent-bar": "强调左线",
+      "minimal-rule": "极简细线",
+    },
+    editorBodyEmphasisStyleTitle: "下划线与高亮",
+    editorBodyEmphasisStyles: {
+      default: "默认",
+      marker: "荧光底边",
+    },
+    editorBodyMagazineCoverTitle: "杂志封面与导览",
+    editorBodyMagazineCoverDescription: "在长文顶部展示杂志风格破框封面卡片与分章节导览卡片",
     editorBodyCssTitle: "自定义 CSS",
     editorBodyCssDescription: "同一份样式。浅色写间距和颜色，紧随的 :root.dark 只覆盖颜色。字号和行高不写在这里。",
     editorBodyCssPreviewLabel: "预览",
@@ -1316,6 +1340,8 @@ export const zhCN = {
     themeToggleToLight: "切换到浅色模式",
     tabs: {
       general: "常规设置",
+      reading: "阅读与排版",
+      editing: "编辑器",
       shortcuts: "快捷键",
       ai: "模型与代理",
       speech: "音视频转写",
@@ -2170,7 +2196,7 @@ export const zhCN = {
     },
     errors: {
       backup_name_invalid: "请输入有效文件名，不要包含路径、保留名称或特殊字符。",
-      backup_name_exists: "已存在同名文件，请修改名称。原文件未改动。",
+      backup_name_exists: "已存在同名文件，请稍后重新备份。原文件未改动。",
       backup_file_replaced: "备份文件已被替换，未执行操作。",
       backup_configuration_unavailable: "无法读取备份设置或清理私有暂存。请检查应用数据目录权限并重启。",
       backup_too_large: "加密归档上限为 64 GiB 减 32 字节。更大的归档请选择不加密备份。",
@@ -2305,6 +2331,8 @@ export const zhCN = {
       toggleEditorMode: { label: "切换编辑模式" },
       toggleOutline: { label: "显示/隐藏文档大纲" },
       toggleSidebar: { label: "显示/隐藏侧边栏" },
+      focusTitle: { label: "聚焦笔记标题" },
+      focusBody: { label: "聚焦笔记正文" },
     },
   },
   quickSwitcher: {
@@ -3076,6 +3104,24 @@ export const zhCN = {
     publicUpdated: "更新于 {{time}}",
     publicUnavailable: "这篇分享笔记不可用",
     publicUnavailableHint: "链接可能无效、已被分享者撤销，或原笔记已经删除。",
+    expiryLabel: "链接有效期",
+    expiryNever: "永久有效",
+    expiry1Day: "1 天",
+    expiry7Days: "7 天",
+    expiry30Days: "30 天",
+    expiryCustom: "自定义日期",
+    expiryCustomLabel: "到期日期",
+    expiryCustomSave: "设置日期",
+    expiryInvalid: "请选择一个将来的日期。",
+    expiresOn: "{{date}} 到期",
+    expiredOn: "已于 {{date}} 过期",
+    expiredNotice: "此链接已过期，访问者只会看到过期提示，看不到笔记。可以延长有效期、取消期限或撤销分享。",
+    expiredBadge: "已过期",
+    viewsCount: "已打开 {{count}} 次",
+    viewsLast: "最近一次 {{date}}",
+    viewsNone: "尚未被打开",
+    publicExpired: "此分享链接已过期",
+    publicExpiredHint: "分享者为此链接设置了有效期。如需查看，请向对方索取新的链接。",
   },
   slashMenu: {
     menu: "插入功能菜单",
@@ -3230,7 +3276,7 @@ export const zhCN = {
     empty: "没有找到可引用的笔记",
     loading: "正在搜索笔记...",
     close: "关闭引用笔记",
-    openHint: "按住 {{modifier}} 点击链接即可打开。如需改为单击打开，请前往个人中心 → 常规设置关闭此选项",
+    openHint: "按住 {{modifier}} 点击链接即可打开。如需改为单击打开，请前往个人中心 → 编辑器关闭此选项",
   },
   mobileNotebookPicker: {
     title: "切换笔记本",

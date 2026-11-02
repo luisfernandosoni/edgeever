@@ -1,7 +1,9 @@
+import { noteImportJa } from "./note-import";
 import { memoTemplateSeedTranslations } from "../memo-template-seeds";
 
 // Shared by the PWA and native mobile clients.
 export const ja = {
+  noteImport: noteImportJa,
   notebookAppearance: {
     inversion: "反転",
     invertOff: "なし",
@@ -525,6 +527,7 @@ export const ja = {
     cloudflareChallenge: "Cloudflare のブラウザチャレンジがログイン API を遮断し、このページでは完了できません。インスタンス管理者に、ログイン向けの WAF Challenge ルールの調整を依頼してください。",
     securityPolicyBlocked: "セキュリティポリシーが、リクエストが EdgeEver に届く前に遮断しました。インスタンス管理者に、Cloudflare Security Events、Access、WAF、またはリバースプロキシのルール確認を依頼してください。",
     requestForbidden: "インスタンスがログインリクエストを拒否しました（HTTP 403）。インスタンス管理者にアクセスポリシーの確認を依頼してください。",
+    databaseDailyQuotaExceeded: "インスタンスの Cloudflare D1 の1日のデータベース上限に達しました。UTC 00:00 にリセットされます。管理者は Workers プランをアップグレードすることもできます。",
     instanceServerError: "インスタンスで一時的なエラーが発生しています。しばらくしてから再試行してください。",
     requestRejected: "インスタンスがログインリクエストを拒否しました（HTTP {{status}}）。インスタンス管理者に連絡してください。",
     invalidInstanceResponse: "有効な EdgeEver インスタンスではありません。インスタンスアドレスを確認してください。",
@@ -1168,12 +1171,33 @@ export const ja = {
       native: "標準",
       clay: "朱橙",
       dawn: "オーカーゴールド",
+      emerald: "翡翠",
       teal: "ジェイドティール",
       azure: "ロイヤルブルー",
       violet: "アイリスパープル",
       pink: "ローズピンク",
       slate: "モーヴグレー",
     },
+    editorBodyHeadingStyleTitle: "見出しスタイル",
+    editorBodyHeadingStyles: {
+      default: "標準",
+      bar: "左バー",
+      numbered: "番号付きセクション",
+    },
+    editorBodyQuoteStyleTitle: "引用スタイル",
+    editorBodyQuoteStyles: {
+      default: "標準",
+      dashed: "破線カード",
+      "accent-bar": "アクセント左線",
+      "minimal-rule": "ミニマル細線",
+    },
+    editorBodyEmphasisStyleTitle: "下線とハイライト",
+    editorBodyEmphasisStyles: {
+      default: "標準",
+      marker: "蛍光アンダーライン",
+    },
+    editorBodyMagazineCoverTitle: "マガジンカバーと概要",
+    editorBodyMagazineCoverDescription: "記事の先頭に雑誌風のカバーカードとセクション案内を表示します",
     editorBodyCssTitle: "カスタム CSS",
     editorBodyCssDescription: "スタイルは1つです。ライトで間隔と色を書き、直後の :root.dark は色だけを上書きします。文字サイズと行間はここでは指定しません。",
     editorBodyCssPreviewLabel: "プレビュー",
@@ -1305,6 +1329,8 @@ export const ja = {
     themeToggleToLight: "ライトモードに切り替え",
     tabs: {
       general: "一般",
+      reading: "閲覧と組版",
+      editing: "エディター",
       shortcuts: "ショートカット",
       ai: "モデルとエージェント",
       speech: "音声・動画の文字起こし",
@@ -2159,7 +2185,7 @@ export const ja = {
     },
     errors: {
       backup_name_invalid: "パス、予約名、特殊文字を含まない有効なファイル名を入力してください。",
-      backup_name_exists: "同名のファイルがあります。別の名前を選んでください。既存のファイルは変更されていません。",
+      backup_name_exists: "同名のファイルがあります。少し待ってから再度バックアップしてください。既存のファイルは変更されていません。",
       backup_file_replaced: "バックアップファイルが置き換えられたため、操作を中止しました。",
       backup_configuration_unavailable: "バックアップ設定の読み取りか一時ファイルの削除に失敗しました。アプリのデータフォルダーの権限を確認し、再起動してください。",
       backup_too_large: "暗号化アーカイブの上限は 64 GiB から 32 バイトを引いたサイズです。より大きい場合は暗号化なしで保存してください。",
@@ -2294,6 +2320,8 @@ export const ja = {
       toggleEditorMode: { label: "エディタモードを切り替え" },
       toggleOutline: { label: "ドキュメントアウトラインの表示/非表示" },
       toggleSidebar: { label: "サイドバーの表示/非表示" },
+      focusTitle: { label: "ノートのタイトルにフォーカス" },
+      focusBody: { label: "ノートの本文にフォーカス" },
     },
   },
   quickSwitcher: {
@@ -3067,6 +3095,24 @@ export const ja = {
     publicUpdated: "更新 {{time}}",
     publicUnavailable: "この共有ノートは利用できません",
     publicUnavailableHint: "リンクが無効か、所有者が取り消したか、ノートが削除された可能性があります。",
+    expiryLabel: "リンクの有効期限",
+    expiryNever: "無期限",
+    expiry1Day: "1 日",
+    expiry7Days: "7 日",
+    expiry30Days: "30 日",
+    expiryCustom: "日付を指定",
+    expiryCustomLabel: "有効期限の日付",
+    expiryCustomSave: "日付を設定",
+    expiryInvalid: "今日より後の日付を選択してください。",
+    expiresOn: "{{date}} に期限切れ",
+    expiredOn: "{{date}} に期限切れになりました",
+    expiredNotice: "このリンクは期限切れです。閲覧者にはノートではなく期限切れのメッセージが表示されます。期限を延長するか、期限を外すか、共有を取り消してください。",
+    expiredBadge: "期限切れ",
+    viewsCount: "{{count}} 回表示",
+    viewsLast: "最終 {{date}}",
+    viewsNone: "まだ表示されていません",
+    publicExpired: "この共有リンクは期限切れです",
+    publicExpiredHint: "所有者がこのリンクに有効期限を設定しています。新しいリンクを依頼してください。",
   },
   slashMenu: {
     menu: "挿入メニュー",
@@ -3221,7 +3267,7 @@ export const ja = {
     empty: "ノートが見つかりません",
     loading: "ノートを検索中...",
     close: "ノート選択を閉じる",
-    openHint: "{{modifier}} を押しながらクリックするとリンクを開きます。1 クリックで開く場合は、プロフィール → 一般でこの設定をオフにしてください",
+    openHint: "{{modifier}} を押しながらクリックするとリンクを開きます。1 クリックで開く場合は、プロフィール → エディターでこの設定をオフにしてください",
   },
   mobileNotebookPicker: {
     title: "ノートブックを切り替え",

@@ -1,7 +1,9 @@
+import { noteImportEnUS } from "./note-import";
 import { memoTemplateSeedTranslations } from "../memo-template-seeds";
 
 // Shared by the PWA and native mobile clients.
 export const enUS = {
+  noteImport: noteImportEnUS,
   notebookAppearance: {
     inversion: "Invert",
     invertOff: "Off",
@@ -536,6 +538,7 @@ export const enUS = {
     cloudflareChallenge: "A Cloudflare browser challenge intercepted the login API and cannot run in this page. Ask the instance administrator to adjust the WAF Challenge rule for login.",
     securityPolicyBlocked: "A security policy blocked the request before it reached EdgeEver. Ask the instance administrator to check Cloudflare Security Events, Access, WAF, or reverse-proxy rules.",
     requestForbidden: "The instance rejected the login request (HTTP 403). Ask the instance administrator to check its access policy.",
+    databaseDailyQuotaExceeded: "The instance’s Cloudflare D1 daily database quota is exhausted. It resets at 00:00 UTC. The instance owner can also upgrade the Workers plan.",
     instanceServerError: "The instance is temporarily unavailable. Try again later.",
     requestRejected: "The instance rejected the login request (HTTP {{status}}). Contact the instance administrator.",
     invalidInstanceResponse: "This is not a valid EdgeEver instance. Check the instance address.",
@@ -1179,12 +1182,33 @@ export const enUS = {
       native: "Native",
       clay: "Vermilion orange",
       dawn: "Ochre gold",
+      emerald: "Emerald",
       teal: "Jade teal",
       azure: "Royal blue",
       violet: "Iris purple",
       pink: "Rose pink",
       slate: "Mauve gray",
     },
+    editorBodyHeadingStyleTitle: "Heading style",
+    editorBodyHeadingStyles: {
+      default: "Default",
+      bar: "Left bar",
+      numbered: "Numbered sections",
+    },
+    editorBodyQuoteStyleTitle: "Quote style",
+    editorBodyQuoteStyles: {
+      default: "Default",
+      dashed: "Dashed card",
+      "accent-bar": "Accent bar",
+      "minimal-rule": "Minimal rule",
+    },
+    editorBodyEmphasisStyleTitle: "Underline & highlight",
+    editorBodyEmphasisStyles: {
+      default: "Default",
+      marker: "Marker underline",
+    },
+    editorBodyMagazineCoverTitle: "Magazine cover & outline",
+    editorBodyMagazineCoverDescription: "Display a magazine-style breaking cover card and section outline cards at the top",
     editorBodyCssTitle: "Custom CSS",
     editorBodyCssDescription: "One stylesheet. Light rules set spacing and color, and the following :root.dark rules only override color. Size and line height stay on the controls above.",
     editorBodyCssPreviewLabel: "Preview",
@@ -1316,6 +1340,8 @@ export const enUS = {
     themeToggleToLight: "Switch to light mode",
     tabs: {
       general: "General",
+      reading: "Reading & Typography",
+      editing: "Editor",
       shortcuts: "Shortcuts",
       ai: "Models and agents",
       speech: "Audio/video transcription",
@@ -2170,7 +2196,7 @@ export const enUS = {
     },
     errors: {
       backup_name_invalid: "Enter a valid filename without paths, reserved names or special characters.",
-      backup_name_exists: "A file with this name already exists. Choose another name; the existing file is unchanged.",
+      backup_name_exists: "A file with this name already exists. Try again in a moment; the existing file is unchanged.",
       backup_file_replaced: "The backup file was replaced. No action was taken.",
       backup_configuration_unavailable: "Could not read backup settings or clean private staging. Check the app data folder permissions and restart.",
       backup_too_large: "Encrypted backups are limited to 64 GiB minus 32 bytes. Choose an unencrypted backup for a larger archive.",
@@ -2305,6 +2331,8 @@ export const enUS = {
       toggleEditorMode: { label: "Switch editor mode" },
       toggleOutline: { label: "Show/hide document outline" },
       toggleSidebar: { label: "Show/hide sidebar" },
+      focusTitle: { label: "Focus note title" },
+      focusBody: { label: "Focus note body" },
     },
   },
   quickSwitcher: {
@@ -3078,6 +3106,24 @@ export const enUS = {
     publicUpdated: "Updated {{time}}",
     publicUnavailable: "This shared note is unavailable",
     publicUnavailableHint: "The link may be invalid, the owner may have revoked it, or the note may have been deleted.",
+    expiryLabel: "Link expiry",
+    expiryNever: "No expiry",
+    expiry1Day: "1 day",
+    expiry7Days: "7 days",
+    expiry30Days: "30 days",
+    expiryCustom: "Custom date",
+    expiryCustomLabel: "Expiry date",
+    expiryCustomSave: "Set date",
+    expiryInvalid: "Choose a date in the future.",
+    expiresOn: "Expires {{date}}",
+    expiredOn: "Expired {{date}}",
+    expiredNotice: "This link has expired. Visitors see an expiry message instead of the note. Extend it, remove the expiry or revoke sharing.",
+    expiredBadge: "Expired",
+    viewsCount: "Opened {{count}} times",
+    viewsLast: "last on {{date}}",
+    viewsNone: "Not opened yet",
+    publicExpired: "This shared link has expired",
+    publicExpiredHint: "The owner set this link to stop working after a certain date. Ask them for a new link.",
   },
   slashMenu: {
     menu: "Insert menu",
@@ -3232,7 +3278,7 @@ export const enUS = {
     empty: "No notes found",
     loading: "Searching notes...",
     close: "Close note picker",
-    openHint: "Hold {{modifier}} and click to open the link. To open links with a single click, turn this option off in Profile → General",
+    openHint: "Hold {{modifier}} and click to open the link. To open links with a single click, turn this option off in Profile → Editor",
   },
   mobileNotebookPicker: {
     title: "Switch notebook",

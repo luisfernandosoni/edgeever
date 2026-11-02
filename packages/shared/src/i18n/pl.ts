@@ -1,7 +1,9 @@
+import { noteImportPl } from "./note-import";
 import { memoTemplateSeedTranslations } from "../memo-template-seeds";
 
 // Shared by the PWA and native mobile clients.
 export const pl = {
+  noteImport: noteImportPl,
   notebookAppearance: {
     inversion: "Odwrócenie",
     invertOff: "Wyłączone",
@@ -525,6 +527,7 @@ export const pl = {
     cloudflareChallenge: "Weryfikacja przeglądarki Cloudflare przechwyciła żądanie API logowania i nie może zostać wykonana na tej stronie. Poproś administratora instancji o dostosowanie reguły WAF Challenge dla logowania.",
     securityPolicyBlocked: "Zasada zabezpieczeń zablokowała żądanie, zanim dotarło do EdgeEver. Poproś administratora instancji o sprawdzenie Cloudflare Security Events, Access, WAF lub reguł odwrotnego serwera proxy.",
     requestForbidden: "Instancja odrzuciła żądanie logowania (HTTP 403). Poproś administratora instancji o sprawdzenie zasad dostępu.",
+    databaseDailyQuotaExceeded: "Wyczerpano dzienny limit bazy danych Cloudflare D1 tej instancji. Limit odnawia się o 00:00 UTC. Administrator może też przejść na płatny plan Workers.",
     instanceServerError: "Instancja jest tymczasowo niedostępna. Spróbuj ponownie później.",
     requestRejected: "Instancja odrzuciła żądanie logowania (HTTP {{status}}). Skontaktuj się z administratorem instancji.",
     invalidInstanceResponse: "To nie jest prawidłowa instancja EdgeEver. Sprawdź adres instancji.",
@@ -1168,12 +1171,33 @@ export const pl = {
       native: "Natywne",
       clay: "Cynobrowy pomarańcz",
       dawn: "Ochrowe złoto",
+      emerald: "Szmaragdowy",
       teal: "Jadeitowy turkus",
       azure: "Królewski błękit",
       violet: "Irysowy fiolet",
       pink: "Różany róż",
       slate: "Szarość z fioletem",
     },
+    editorBodyHeadingStyleTitle: "Styl nagłówków",
+    editorBodyHeadingStyles: {
+      default: "Domyślny",
+      bar: "Pasek z lewej",
+      numbered: "Numerowane sekcje",
+    },
+    editorBodyQuoteStyleTitle: "Styl cytatów",
+    editorBodyQuoteStyles: {
+      default: "Domyślny",
+      dashed: "Karta z przerywaną ramką",
+      "accent-bar": "Pasek akcentu",
+      "minimal-rule": "Minimalna linia",
+    },
+    editorBodyEmphasisStyleTitle: "Podkreślenie i wyróżnienie",
+    editorBodyEmphasisStyles: {
+      default: "Domyślny",
+      marker: "Zakreślacz pod tekstem",
+    },
+    editorBodyMagazineCoverTitle: "Okładka i spis magazynu",
+    editorBodyMagazineCoverDescription: "Pokaż u góry notatki kartę tytułową w stylu magazynu oraz kafelki sekcji",
     editorBodyCssTitle: "Własny CSS",
     editorBodyCssDescription: "Jeden arkusz stylów. Reguły jasne ustawiają odstępy i kolory, a następujące po nich reguły :root.dark nadpisują tylko kolory. Rozmiar i interlinia pozostają w ustawieniach powyżej.",
     editorBodyCssPreviewLabel: "Podgląd",
@@ -1305,6 +1329,8 @@ export const pl = {
     themeToggleToLight: "Przełącz na tryb jasny",
     tabs: {
       general: "Ogólne",
+      reading: "Czytanie i typografia",
+      editing: "Edytor",
       shortcuts: "Skróty",
       ai: "Modele i agenci",
       speech: "Transkrypcja audio i wideo",
@@ -2159,7 +2185,7 @@ export const pl = {
     },
     errors: {
       backup_name_invalid: "Wpisz prawidłową nazwę pliku bez ścieżek, nazw zastrzeżonych i znaków specjalnych.",
-      backup_name_exists: "Plik o tej nazwie już istnieje. Wybierz inną nazwę; istniejący plik nie został zmieniony.",
+      backup_name_exists: "Plik o tej nazwie już istnieje. Spróbuj ponownie za chwilę; istniejący plik nie został zmieniony.",
       backup_file_replaced: "Plik kopii został zastąpiony. Nie wykonano operacji.",
       backup_configuration_unavailable: "Nie można odczytać ustawień kopii lub usunąć plików tymczasowych. Sprawdź uprawnienia folderu danych aplikacji i uruchom ją ponownie.",
       backup_too_large: "Limit szyfrowanego archiwum wynosi 64 GiB minus 32 bajty. Dla większego pliku wybierz kopię bez szyfrowania.",
@@ -2294,6 +2320,8 @@ export const pl = {
       toggleEditorMode: { label: "Przełącz tryb edytora" },
       toggleOutline: { label: "Pokaż/ukryj konspekt dokumentu" },
       toggleSidebar: { label: "Pokaż/ukryj pasek boczny" },
+      focusTitle: { label: "Przejdź do tytułu notatki" },
+      focusBody: { label: "Przejdź do treści notatki" },
     },
   },
   quickSwitcher: {
@@ -3067,6 +3095,24 @@ export const pl = {
     publicUpdated: "Zaktualizowano: {{time}}",
     publicUnavailable: "Ta udostępniona notatka jest niedostępna",
     publicUnavailableHint: "Link może być nieprawidłowy, właściciel mógł go unieważnić albo notatka mogła zostać usunięta.",
+    expiryLabel: "Ważność linku",
+    expiryNever: "Bez terminu",
+    expiry1Day: "1 dzień",
+    expiry7Days: "7 dni",
+    expiry30Days: "30 dni",
+    expiryCustom: "Własna data",
+    expiryCustomLabel: "Data wygaśnięcia",
+    expiryCustomSave: "Ustaw datę",
+    expiryInvalid: "Wybierz datę w przyszłości.",
+    expiresOn: "Wygasa {{date}}",
+    expiredOn: "Wygasł {{date}}",
+    expiredNotice: "Ten link wygasł. Odwiedzający widzą komunikat o wygaśnięciu zamiast notatki. Przedłuż go, usuń termin albo unieważnij udostępnianie.",
+    expiredBadge: "Wygasł",
+    viewsCount: "Otwarcia: {{count}}",
+    viewsLast: "ostatnio {{date}}",
+    viewsNone: "Jeszcze nie otwarto",
+    publicExpired: "Ten link udostępniania wygasł",
+    publicExpiredHint: "Właściciel ustawił termin ważności tego linku. Poproś go o nowy link.",
   },
   slashMenu: {
     menu: "Menu wstawiania",
@@ -3221,7 +3267,7 @@ export const pl = {
     empty: "Nie znaleziono notatek",
     loading: "Wyszukiwanie notatek...",
     close: "Zamknij wybór notatki",
-    openHint: "Przytrzymaj {{modifier}} i kliknij, aby otworzyć link. Aby otwierać linki jednym kliknięciem, wyłącz tę opcję w Profil → Ogólne",
+    openHint: "Przytrzymaj {{modifier}} i kliknij, aby otworzyć link. Aby otwierać linki jednym kliknięciem, wyłącz tę opcję w Profil → Edytor",
   },
   mobileNotebookPicker: {
     title: "Przełącz notatnik",
