@@ -112,6 +112,41 @@ describe("preparePublishArticle", () => {
     }
   });
 
+  test("keeps nested editor table paragraphs compact and header text readable", () => {
+    const container = document.createElement("div");
+    container.dataset.notePalette = "violet";
+    const previous = globalThis.getComputedStyle;
+    globalThis.getComputedStyle = () => ({
+      getPropertyValue: (name) => ({
+        "--note-palette-light-accent": "#7351CF",
+        "--note-palette-text": "#27272a",
+      })[name] ?? "",
+    });
+    try {
+      for (const palette of ["violet", "native"]) {
+        container.dataset.notePalette = palette;
+        const root = preparePublishArticle(
+          '<p>正文</p><table><tbody><tr><th><p>表头 <strong>重点</strong></p></th></tr>' +
+          '<tr><td><p>内容 <strong>重点</strong></p><p>第二段</p></td></tr></tbody></table>', container,
+        );
+        const header = root.querySelector("th p");
+        expect(css(header)).toContain(`color:${palette === "violet" ? "#ffffff" : "#111827"}`);
+        expect(css(header)).toContain("font-size:13.44px");
+        expect(css(header.querySelector("strong"))).toContain(`color:${palette === "violet" ? "#ffffff" : "#111827"}`);
+        for (const paragraph of root.querySelectorAll("th p, td p")) {
+          expect(css(paragraph)).toContain("margin:0");
+          expect(css(paragraph)).toContain("line-height:1.45");
+        }
+        expect(css(root.querySelector("td p"))).toContain("font-size:16px");
+        expect(css(root.querySelector("td strong"))).toContain("color:#111827");
+        expect(css(root.firstElementChild)).toContain("color:#27272a");
+        expect(css(root.firstElementChild)).not.toContain("margin:0;");
+      }
+    } finally {
+      globalThis.getComputedStyle = previous;
+    }
+  });
+
   test("matches the light editor instead of the old rose-and-green paste", () => {
     const root = preparePublishArticle([
       "<blockquote><p>引用</p></blockquote>",
@@ -202,7 +237,7 @@ describe("preparePublishArticle", () => {
       expect(h2?.textContent).toContain("章节标题");
       expect(h2?.querySelector("[data-ee-heading-number]")?.innerHTML).toContain("#059669");
       const h3 = root.querySelector("h3");
-      expect(css(h3)).toContain("border-radius:999px");
+      expect(css(h3)).toContain("border-radius:1em");
       expect(h3?.querySelector("[data-ee-pill-dot]")).not.toBeNull();
       const quote = root.querySelector("blockquote");
       expect(css(quote)).toContain("border:1px dashed #d1d5db");
@@ -216,6 +251,57 @@ describe("preparePublishArticle", () => {
       expect(css(root.querySelector("code"))).toContain("font-weight:600");
       expect(root.querySelector("[data-ee-cover-card]")).toBeNull();
       expect(root.querySelector("[data-ee-toc-cards]")).toBeNull();
+    } finally {
+      globalThis.getComputedStyle = previous;
+    }
+  });
+
+  test("numbered headings follow body size while preserving the wrapping pill", () => {
+    const container = document.createElement("div");
+    container.dataset.notePalette = "native";
+    container.dataset.noteHeadingStyle = "numbered";
+    const previous = globalThis.getComputedStyle;
+    try {
+      for (const size of [14, 16, 18]) {
+        globalThis.getComputedStyle = () => ({
+          getPropertyValue: (name) => name === "--editor-body-font-size" ? `${size}px` : "",
+        });
+        const root = preparePublishArticle("<h2>章节</h2><h3>包含 <strong>强调</strong> 的长标题</h3><h4>子标题</h4><p>正文</p>", container);
+        expect(root.querySelector("h3").style.fontSize).toBe(`${size}px`);
+        expect(root.querySelector("h4").style.fontSize).toBe(`${size}px`);
+        expect(root.querySelector("p:not([data-ee-publish-chrome])").style.fontSize).toBe(`${size}px`);
+        const h2Title = Array.from(root.querySelectorAll("h2 p")).find((p) => p.textContent === "章节");
+        expect(h2Title.style.fontSize).toBe(`${size * 1.4}px`);
+        expect(css(root.querySelector("h3"))).toContain("max-width:100%");
+        expect(root.querySelector("h3 strong").textContent).toBe("强调");
+        expect(root.querySelectorAll("[data-ee-pill-dot]").length).toBe(1);
+      }
+    } finally {
+      globalThis.getComputedStyle = previous;
+    }
+  });
+
+  test("exports body rhythm independently of headings and keeps table cells compact", () => {
+    const container = document.createElement("div");
+    container.dataset.notePalette = "native";
+    const previous = globalThis.getComputedStyle;
+    try {
+      for (const headingStyle of ["default", "bar", "numbered"]) {
+        container.dataset.noteHeadingStyle = headingStyle;
+        globalThis.getComputedStyle = () => ({ getPropertyValue: (name) => ({
+          "--editor-paragraph-spacing": "12px",
+          "--editor-body-text-align": "justify",
+          "--editor-body-letter-spacing": "0.5px",
+        })[name] ?? "" });
+        const root = preparePublishArticle("<h3>标题</h3><p>正文</p><table><tbody><tr><td><p>单元格</p></td></tr></tbody></table>", container);
+        const body = root.querySelector(":scope > p");
+        expect(body.style.margin).toBe("0 0 12px");
+        expect(body.style.textAlign).toBe("justify");
+        expect(body.style.letterSpacing).toBe("0.5px");
+        const cell = root.querySelector("td p");
+        expect(cell.style.margin).toBe("0");
+        expect(cell.style.textAlign).toBe("inherit");
+      }
     } finally {
       globalThis.getComputedStyle = previous;
     }
@@ -241,15 +327,29 @@ describe("preparePublishArticle", () => {
     });
     try {
       const root = preparePublishArticle([
-        "<h2>第一章</h2>",
+        "<h2>效率工具箱：斜杠指令、双链与数学公式</h2>",
         "<p>内容一</p>",
-        "<h2>第二章</h2>",
+        "<h2>多媒体管理、无损备份与零成本自建</h2>",
         "<p>内容二</p>",
       ].join(""), container);
       expect(root.querySelector("[data-ee-cover-card]")).not.toBeNull();
       expect(root.querySelector("[data-ee-cover-card]")?.textContent).toContain("深度评测文章");
       expect(root.querySelector("[data-ee-toc-cards]")).not.toBeNull();
       expect(root.querySelector("[data-ee-toc-cards]")?.textContent).toContain("2 PARTS");
+      const card = root.querySelector('[data-ee-toc-cards] section[style*="width: 136px"]');
+      expect(css(card)).toContain("background-color:#059669");
+      expect(css(card)).toContain("linear-gradient(135deg,");
+      expect(css(card)).not.toContain("color-mix");
+      const cards = root.querySelectorAll('[data-ee-toc-cards] section[style*="width: 136px"]');
+      expect(cards.length).toBe(2);
+      for (const item of cards) {
+        expect(css(item)).not.toContain("height:");
+        expect(css(item.parentElement)).toContain("display:flex");
+        expect(css(item.parentElement)).toContain("align-items:stretch");
+        expect(css(item)).toContain("box-sizing:border-box");
+        expect(css(item)).toContain("border:1px solid");
+        expect(css(item.querySelector("p"))).toContain("line-height:1.4");
+      }
     } finally {
       globalThis.getComputedStyle = previous;
     }

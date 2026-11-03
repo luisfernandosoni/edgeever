@@ -1,4 +1,4 @@
-import { app, Notification, BrowserWindow, Menu, Tray, globalShortcut, nativeImage, ipcMain, session, net, protocol, shell, dialog, safeStorage, clipboard, ClipboardItem, powerMonitor, desktopCapturer, screen, utilityProcess } from "electron";
+import { app, autoUpdater as nativeAutoUpdater, Notification, BrowserWindow, Menu, Tray, globalShortcut, nativeImage, ipcMain, session, net, protocol, shell, dialog, safeStorage, clipboard, ClipboardItem, powerMonitor, desktopCapturer, screen, utilityProcess } from "electron";
 import { createReadStream, existsSync } from "node:fs";
 import { appendFile, mkdir, open, readdir, readFile, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
@@ -8,6 +8,7 @@ import { backgroundNodeExecutable } from "./background-node.mjs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { release as operatingSystemRelease } from "node:os";
 import { BackupManager } from "./backup-manager.mjs";
+import { OffsiteBackup } from "./backup-offsite.mjs";
 import { createBackupWorkerFactory } from "./backup-worker.mjs";
 import { registerBackupIpc } from "./backup-ipc.mjs";
 import { SidecarRpcClient } from "./rpc.mjs";
@@ -41,6 +42,7 @@ import { formatGlobalShortcutForHumans, globalShortcutAccelerator, globalShortcu
 import { trayIconPath } from "./tray-icon.mjs";
 import { writeFileClipboard, writeImageClipboard, writeRichClipboard, writeTextClipboard } from "./clipboard-write.mjs";
 import { registerClipboardReadIpc } from "./clipboard-read.mjs";
+import { registerAttachmentOpenIpc } from "./attachment-open.mjs";
 import { captureRegionScreenToNote, captureScreenToNote, createScreenshotCaptureGuard, screenshotImportIpcPayload, writeScreenshotTempPath } from "./screenshot-capture.mjs";
 import { cancelScreenshotRegionSelection, openScreenshotRegionSelector } from "./screenshot-region.mjs";
 import { LocalDataResetError, scheduleMacLocalDataReset } from "./local-data-reset.mjs";
@@ -58,6 +60,7 @@ import {
   verifyDownloadedWindowsUpdate,
 } from "./windows-update-trust.mjs";
 import electronUpdater from "electron-updater";
+import { createDesktopUpdateController } from "./desktop-update-controller.mjs";
 import { createUpdateDiagnostic } from "./update-diagnostics.mjs";
 import { createUpdateNetworkDiagnostics } from "./update-network-diagnostics.mjs";
 import { normalizeUpdateProgress } from "./update-progress.mjs";
@@ -152,14 +155,11 @@ let isQuitting = false;
 let updateState = "idle";
 let updateError = null;
 let updateProgress = null;
-let updateCheckInFlight = null;
-let updateDownloadInFlight = null;
+let desktopUpdateController = null;
 let updateCheckTimer = null;
 let lastUpdateCheckAt = 0;
 let downloadedUpdateVersion = null;
 let promptedUpdateVersion = null;
-let trustedWindowsUpdate = null;
-let windowsDownloadedUpdateVerified = false;
 let sidecarScopeKey = "anonymous";
 let activeAccountId = null;
 let shutdownCleanupStarted = false;
@@ -1020,7 +1020,8 @@ const createTray = () => {
   tray.on("double-click", () => showWindow(mainWindow));
 };
 
-const handleResourceProtocolRequest = async (request) => {
+const handleResourceProtocolRequest = async (request, assertCurrent = () => {}) => {
+  assertCurrent();
   const resourceId = resourceIdFromRequest(request.url);
   if (!resourceId) return new Response("Invalid resource", { status: 400 });
   const downloadDisposition = downloadContentDispositionFromRequest(request.url);
@@ -1064,12 +1065,14 @@ const handleResourceProtocolRequest = async (request) => {
   if (!configuredApiBaseUrl) return new Response("Resource is not cached", { status: 504 });
   const sourceUrl = `${configuredApiBaseUrl}/api/v1/resources/${encodeURIComponent(resourceId)}/blob`;
   try {
+    assertCurrent();
     const sessionToken = credentialForUrl(desktopSessionToken, desktopSessionTokenOrigin, sourceUrl);
     const cookies = await session.defaultSession.cookies.get({ url: sourceUrl });
+    assertCurrent();
     const headers = resourceRequestHeaders({ cookies, sessionToken });
     const rangeHeader = request.headers.get("range");
     if (rangeHeader) headers.set("range", rangeHeader);
-    const response = await net.fetch(sourceUrl, { headers, redirect: "error" });
+    const response = await net.fetch(sourceUrl, { headers, redirect: "error", signal: request.signal });
     if (!response.ok) return new Response("Resource request failed", { status: response.status });
     if (response.status === 206) {
       const responseHeaders = resourceResponseHeaders(response.headers.get("content-type"), downloadDisposition);
@@ -1131,35 +1134,38 @@ const handleResourceProtocolRequest = async (request) => {
   }
 };
 
-const registerResourceProtocol = () => {
-  protocol.handle("edgeever-resource", handleResourceProtocolRequest);
+const handleStagedResourceProtocolRequest = async (request, assertCurrent = () => {}) => {
+  assertCurrent();
+  const stagedId = resourceIdFromRequest(request.url);
+  if (!stagedId) return new Response("Invalid staged resource", { status: 400 });
 
-  protocol.handle("edgeever-staged", async (request) => {
-    const stagedId = resourceIdFromRequest(request.url);
-    if (!stagedId) return new Response("Invalid staged resource", { status: 400 });
-
-    const directory = stagedResourceDirectory();
-    try {
-      const metadata = await readStagedResourceMetadata(directory, stagedId);
-      const path = join(directory, `${stagedId}.bin`);
-      const size = await stat(path).then((details) => details.size).catch(() => null);
-      if (size === null && isSafeResourceId(metadata.resourceId)) {
-        const target = new URL(`edgeever-resource://resource/${encodeURIComponent(metadata.resourceId)}`);
-        target.search = new URL(request.url).search;
-        return handleResourceProtocolRequest(new Request(target, { headers: request.headers }));
-      }
-      if (size === null) throw new Error("Staged bytes are missing");
-      const stream = createReadStream(path);
-      const headers = resourceResponseHeaders(metadata.type, downloadContentDispositionFromRequest(request.url));
-      headers.set("Content-Length", String(size));
-      return new Response(Readable.toWeb(stream), {
-        headers,
-      });
-    } catch (error) {
-      void writeDiagnostic("resource.staged-read-failed", { stagedId, message: error.message });
-      return new Response("Staged resource unavailable", { status: 404 });
+  const directory = stagedResourceDirectory();
+  try {
+    const metadata = await readStagedResourceMetadata(directory, stagedId);
+    const path = join(directory, `${stagedId}.bin`);
+    const size = await stat(path).then((details) => details.size).catch(() => null);
+    if (size === null && isSafeResourceId(metadata.resourceId)) {
+      const target = new URL(`edgeever-resource://resource/${encodeURIComponent(metadata.resourceId)}`);
+      target.search = new URL(request.url).search;
+      assertCurrent();
+      return handleResourceProtocolRequest(new Request(target, { headers: request.headers, signal: request.signal }), assertCurrent);
     }
-  });
+    if (size === null) throw new Error("Staged bytes are missing");
+    const stream = createReadStream(path);
+    const headers = resourceResponseHeaders(metadata.type, downloadContentDispositionFromRequest(request.url));
+    headers.set("Content-Length", String(size));
+    return new Response(Readable.toWeb(stream), {
+      headers,
+    });
+  } catch (error) {
+    void writeDiagnostic("resource.staged-read-failed", { stagedId, message: error.message });
+    return new Response("Staged resource unavailable", { status: 404 });
+  }
+};
+
+const registerResourceProtocol = () => {
+  protocol.handle("edgeever-resource", (request) => handleResourceProtocolRequest(request));
+  protocol.handle("edgeever-staged", (request) => handleStagedResourceProtocolRequest(request));
 };
 
 const registerDesktopAppProtocol = () => {
@@ -1241,43 +1247,11 @@ const publishDesktopUpdateStatus = () => {
   mainWindow.webContents.send("desktop:update-status-changed", desktopUpdateStatus());
 };
 
-const installDownloadedUpdate = () => {
-  if (
-    updateState !== "downloaded" ||
-    (process.platform === "win32" && !windowsDownloadedUpdateVerified)
-  ) return { started: false };
-  // The normal window close handler hides the app. Mark this as a real quit
-  // before electron-updater closes windows so installation can proceed.
-  isQuitting = true;
-  // Keep Windows updates silent and reuse the registered installation directory.
-  autoUpdater.quitAndInstall(process.platform === "win32", true);
-  return { started: true };
-};
+const installDownloadedUpdate = (expectedVersion) =>
+  desktopUpdateController?.install(expectedVersion) ?? Promise.resolve({ started: false });
 
-const trackDesktopUpdateDownload = (downloadPromise, reason) => {
-  updateDownloadInFlight = Promise.resolve(downloadPromise)
-    .catch(async (error) => {
-      updateState = "idle";
-      updateProgress = null;
-      downloadedUpdateVersion = null;
-      windowsDownloadedUpdateVerified = false;
-      refreshTrayMenu();
-      recordUpdateError(error, "download");
-      publishDesktopUpdateStatus();
-      await writeDiagnostic("update.download-failed", { reason, message: error.message });
-    })
-    .finally(() => { updateDownloadInFlight = null; updateNetworkDiagnostics.stop(); });
-  return updateDownloadInFlight;
-};
-
-const downloadTrustedDesktopUpdate = (reason) => {
-  if (updateDownloadInFlight) return updateDownloadInFlight;
-  if (process.platform === "win32" && !trustedWindowsUpdate) {
-    return Promise.reject(new Error("Windows update metadata has not passed the signature gate"));
-  }
-  updateNetworkDiagnostics.setStage("download");
-  return trackDesktopUpdateDownload(autoUpdater.downloadUpdate(), reason);
-};
+const downloadTrustedDesktopUpdate = (reason) =>
+  desktopUpdateController?.download(reason) ?? Promise.resolve();
 
 const promptForDownloadedUpdate = async (version) => {
   const promptKey = version || "unknown";
@@ -1296,69 +1270,17 @@ const promptForDownloadedUpdate = async (version) => {
     noLink: true,
   });
   if (result.response === 0) {
-    void writeDiagnostic("update.install-confirmed", { version });
-    installDownloadedUpdate();
+    void installDownloadedUpdate(version);
   } else {
     void writeDiagnostic("update.install-deferred", { version });
   }
 };
 
 const checkForDesktopUpdate = (reason, { force = false, throwOnError = false } = {}) => {
-  if (!app.isPackaged || process.env.EDGE_EVER_DISABLE_AUTO_UPDATE === "1" || updateState === "downloaded") {
-    return Promise.resolve(null);
-  }
-  if (updateCheckInFlight) {
-    return throwOnError ? updateCheckInFlight : updateCheckInFlight.catch(() => null);
-  }
-  if (updateDownloadInFlight) return Promise.resolve(null);
-  const now = Date.now();
-  if (!force && now - lastUpdateCheckAt < updateCheckFocusThrottleMs) return Promise.resolve(null);
-  lastUpdateCheckAt = now;
-  updateError = null;
-  updateNetworkDiagnostics.beginCheck();
-  publishDesktopUpdateStatus();
-  let diagnosticStage = "check";
-  void writeDiagnostic("update.check-started", { reason });
-  updateCheckInFlight = autoUpdater.checkForUpdates()
-    .then(async (result) => {
-      if (process.platform === "win32" && result?.isUpdateAvailable) {
-        diagnosticStage = "verify-windows-metadata";
-        updateNetworkDiagnostics.setStage(diagnosticStage);
-        trustedWindowsUpdate = await fetchTrustedWindowsUpdate({
-          version: result.updateInfo.version,
-          updateInfo: result.updateInfo,
-          fetchImpl: net.fetch,
-        });
-        windowsDownloadedUpdateVerified = false;
-        void writeDiagnostic("update.windows-manifest-verified", {
-          version: trustedWindowsUpdate.version,
-          keyId: trustedWindowsUpdate.keyId,
-        });
-        void downloadTrustedDesktopUpdate(reason);
-      }
-      if (result?.downloadPromise) {
-        updateNetworkDiagnostics.setStage("download");
-        trackDesktopUpdateDownload(result.downloadPromise, reason);
-      }
-      return result;
-    })
-    .catch(async (error) => {
-      updateState = "idle";
-      updateProgress = null;
-      downloadedUpdateVersion = null;
-      trustedWindowsUpdate = null;
-      windowsDownloadedUpdateVerified = false;
-      refreshTrayMenu();
-      recordUpdateError(error, diagnosticStage);
-      publishDesktopUpdateStatus();
-      await writeDiagnostic("update.check-failed", { reason, message: error.message });
-      throw error;
-    })
-    .finally(() => {
-      updateCheckInFlight = null;
-      if (!updateDownloadInFlight) updateNetworkDiagnostics.stop();
-    });
-  return throwOnError ? updateCheckInFlight : updateCheckInFlight.catch(() => null);
+  if (!desktopUpdateController) return Promise.resolve(null);
+  if (!force && Date.now() - lastUpdateCheckAt < updateCheckFocusThrottleMs) return Promise.resolve(null);
+  const result = desktopUpdateController.check(reason);
+  return throwOnError ? result : result.catch(() => null);
 };
 
 const configureAutoUpdater = () => {
@@ -1387,95 +1309,52 @@ const configureAutoUpdater = () => {
       appImage: process.env.APPIMAGE || null,
     });
   }
-  autoUpdater.autoDownload = process.platform !== "win32";
-  autoUpdater.autoInstallOnAppQuit = process.platform !== "win32";
-  autoUpdater.autoRunAppAfterInstall = true;
-  autoUpdater.on("update-available", (info) => {
-    updateState = "available";
-    updateProgress = null;
-    downloadedUpdateVersion = info?.version || null;
-    if (process.platform === "win32") {
-      trustedWindowsUpdate = null;
-      windowsDownloadedUpdateVerified = false;
-    }
-    refreshTrayMenu();
-    publishDesktopUpdateStatus();
-    void writeDiagnostic("update.available", { version: info?.version });
-  });
-  autoUpdater.on("update-not-available", () => {
-    updateState = "idle";
-    updateProgress = null;
-    downloadedUpdateVersion = null;
-    trustedWindowsUpdate = null;
-    windowsDownloadedUpdateVerified = false;
-    refreshTrayMenu();
-    publishDesktopUpdateStatus();
-    const diagnosticWritten = writeDiagnostic("update.not-available");
-    if (linuxUpdateTestMode) {
-      void diagnosticWritten.finally(() => setTimeout(() => app.quit(), 100));
-    }
-  });
-  autoUpdater.on("download-progress", (progress) => {
-    updateProgress = normalizeUpdateProgress(progress);
-    publishDesktopUpdateStatus();
-    void writeDiagnostic("update.download-progress", { percent: progress.percent });
-  });
-  autoUpdater.on("update-downloaded", (info) => {
-    void (async () => {
-      if (process.platform === "win32") {
-        if (!trustedWindowsUpdate || trustedWindowsUpdate.version !== info?.version) {
-          throw new Error("Downloaded Windows update has no matching trusted manifest");
-        }
-        await verifyDownloadedWindowsUpdate({
-          path: info.downloadedFile,
-          manifest: trustedWindowsUpdate,
-        });
-        windowsDownloadedUpdateVerified = true;
-        autoUpdater.autoInstallOnAppQuit = true;
-      }
-      updateState = "downloaded";
-      updateProgress = null;
+  desktopUpdateController = createDesktopUpdateController({
+    updater: autoUpdater,
+    platform: process.platform,
+    nativeUpdater: nativeAutoUpdater,
+    quitApplication: () => app.quit(),
+    fetchWindowsMetadata: (options) => fetchTrustedWindowsUpdate({ ...options, fetchImpl: net.fetch }),
+    verifyWindowsPackage: verifyDownloadedWindowsUpdate,
+    onStatus: (status) => {
+      updateState = status.state;
+      downloadedUpdateVersion = status.version;
+      updateProgress = status.progress ? normalizeUpdateProgress(status.progress) : null;
       updateError = null;
-      downloadedUpdateVersion = info?.version || downloadedUpdateVersion;
       refreshTrayMenu();
       publishDesktopUpdateStatus();
-      await writeDiagnostic("update.downloaded", { version: downloadedUpdateVersion });
+    },
+    onError: (error, stage) => {
+      isQuitting = false;
+      recordUpdateError(error, stage);
+      publishDesktopUpdateStatus();
+    },
+    onCheckStarted: (reason) => {
+      lastUpdateCheckAt = Date.now();
+      updateError = null;
+      updateNetworkDiagnostics.beginCheck();
+      publishDesktopUpdateStatus();
+      void writeDiagnostic("update.check-started", { reason });
+    },
+    onStage: (stage) => updateNetworkDiagnostics.setStage(stage),
+    onSettled: () => updateNetworkDiagnostics.stop(),
+    log: (event, details) => {
+      const written = writeDiagnostic(event, details);
+      if (linuxUpdateTestMode && event === "update.not-available") {
+        void written.finally(() => setTimeout(() => app.quit(), 100));
+      }
+    },
+    beforeInstall: () => { isQuitting = true; },
+    onDownloaded: (version) => {
       if (linuxUpdateTestMode) {
-        installDownloadedUpdate();
+        void installDownloadedUpdate(version);
         return;
       }
-      await promptForDownloadedUpdate(downloadedUpdateVersion).catch((error) => {
+      void promptForDownloadedUpdate(version).catch((error) => {
         promptedUpdateVersion = null;
         void writeDiagnostic("update.prompt-failed", { message: error.message });
       });
-    })().catch(async (error) => {
-      if (process.platform !== "win32") {
-        await writeDiagnostic("update.download-handler-failed", { message: error.message });
-        return;
-      }
-      autoUpdater.autoInstallOnAppQuit = false;
-      updateState = "idle";
-      updateProgress = null;
-      downloadedUpdateVersion = null;
-      windowsDownloadedUpdateVerified = false;
-      refreshTrayMenu();
-      recordUpdateError(error, "verify-windows-package");
-      publishDesktopUpdateStatus();
-      await writeDiagnostic("update.windows-package-blocked", { message: error.message });
-    });
-  });
-  autoUpdater.on("error", (error) => {
-    isQuitting = false;
-    if (updateState !== "downloaded") {
-      updateState = "idle";
-      updateProgress = null;
-      downloadedUpdateVersion = null;
-      windowsDownloadedUpdateVerified = false;
-    }
-    refreshTrayMenu();
-    recordUpdateError(error, updateDownloadInFlight ? "download" : "check");
-    publishDesktopUpdateStatus();
-    void writeDiagnostic("update.error", { message: error.message });
+    },
   });
   void checkForDesktopUpdate("startup", { force: true });
   updateCheckTimer = setInterval(() => {
@@ -1934,6 +1813,7 @@ const startApplication = async () => {
   });
   backupManager = new BackupManager({
     userData: app.getPath("userData"), defaultDirectory: join(app.getPath("documents"), "EdgeEver Backups"), secureStorage: safeStorage,
+    offsite: new OffsiteBackup({ userData: app.getPath("userData"), secureStorage: safeStorage }),
     workerFactory: createBackupWorkerFactory({ utilityProcess, session: session.defaultSession }),
     version: { edgeeverVersion: app.getVersion(), buildId: app.getVersion() },
     onChange: (status) => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("desktop:backup-status", status); },
@@ -2120,6 +2000,8 @@ const startApplication = async () => {
     onUpdateDiagnostic: (details) => { void writeDiagnostic("acp.adapter-update-failed", details); },
     onDiagnostic: (details) => { void writeDiagnostic("acp.adapter-stderr", details); },
     onProcessDiagnostic: ({ event, ...details }) => { void writeDiagnostic(`acp.adapter-${event}`, details); },
+    // Used only to reopen a validated CodeBuddy login page on explicit request.
+    openExternal: (url) => shell.openExternal(url),
     mcpScriptPath: app.isPackaged
       ? join(process.resourcesPath, "mcp-bridge", "edgeever-mcp-stdio.mjs")
       : join(projectRoot, "scripts", "edgeever-mcp-stdio.mjs"),
@@ -2337,6 +2219,20 @@ const startApplication = async () => {
   });
   ipcMain.handle("desktop:download-update", () => downloadTrustedDesktopUpdate("manual-download"));
   ipcMain.handle("desktop:install-update", () => installDownloadedUpdate());
+  registerAttachmentOpenIpc(ipcMain, {
+    authorize: (event) => {
+      if (!isAppRendererSender(event) || instanceChangePending
+        || !isAllowedAppNavigation(event.senderFrame.url, desktopRendererEntryUrl())) {
+        throw new Error("Attachment open forbidden");
+      }
+    },
+    getScope: () => JSON.stringify([configuredApiBaseUrl, activeAccountId, desktopSessionToken]),
+    getDirectory: () => join(sidecarDataDirectory(activeAccountId), "opened-attachments"),
+    readResource: (url, signal, assertCurrent) => url.startsWith("edgeever-staged:")
+      ? handleStagedResourceProtocolRequest(new Request(url, { signal }), assertCurrent)
+      : handleResourceProtocolRequest(new Request(url, { signal }), assertCurrent),
+    openPath: (path) => shell.openPath(path),
+  });
   ipcMain.handle("desktop:stage-resource-begin", async (_event, input) => {
     const { memoId, name, type, size } = normalizeStagedResourceMetadataInput(input);
     const id = `stage_${Date.now()}_${Math.random().toString(36).slice(2)}`;
@@ -2573,6 +2469,7 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", (event) => {
+  if (desktopUpdateController?.handleBeforeQuit(event)) return;
   if (shutdownCleanupStarted) return;
   event.preventDefault();
   shutdownCleanupStarted = true;
