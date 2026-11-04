@@ -1000,34 +1000,35 @@ export const DEMO_SEED_MEMOS_ZH = [
 
 \`\`\`mermaid
 flowchart TD
-    subgraph MultiClients["全端客户端矩阵"]
-        C1["Web / PWA (离线草稿 & 增量同步)"]
-        C2["macOS 桌面端 (Electron + Rust Sidecar)"]
-        C3["Windows / Linux 桌面端 (ACP 智能体集成)"]
-        C4["Android 原生 App (Expo + SQLite)"]
-        C5["iOS 原生 App (SwiftUI + GRDB)"]
-        C6["浏览器剪藏插件 (Chrome / Edge / Firefox)"]
+    subgraph ClientLayer["全端客户端"]
+        Clients["全端客户端矩阵<br/>Web · PWA · 桌面客户端<br/>iOS · Android · 浏览器剪藏"]
     end
 
-    subgraph CoreEngine["业务与数据服务层"]
-        API["Hono API 引擎 (Cloudflare Workers / Docker)"]
-        MCP["原生 MCP Endpoint (/mcp 2026-07-28 & 2025)"]
-        D1[("D1 / SQLite 数据库 (双向同步 & 修订版本)")]
-        R2[("R2 / S3 资源存储 (图片与多媒体附件)")]
+    subgraph Ecosystem["AI 与外部生态"]
+        direction LR
+        LLMs["主流大语言模型<br/>OpenAI · Gemini · DeepSeek"]
+        Agents["外部 AI 智能体<br/>Claude Code · Cursor · Antigravity"]
     end
 
-    subgraph AIAgents["AI 智能体与外部生态"]
-        A1["Claude Code / Cursor / Antigravity"]
-        A2["行内 AI 助手 (OpenAI / Gemini / DeepSeek)"]
-        A3["Notion 数据库 / 飞书多维表格联动"]
+    subgraph Platform["EdgeEver 平台核心 (Cloudflare Workers / Docker)"]
+        API["统一 REST API 入口<br/>认证鉴权 · 限流 · 增量同步游标"]
+        MCP["原生 MCP 服务端点 (/mcp)<br/>上下文感知 · 工具读写协议"]
     end
 
-    MultiClients <==>|REST API & 同步游标| API
-    API <==> D1 & R2
-    MCP <==> D1 & R2
-    A1 <==>|MCP Tools / SSE| MCP
-    A2 -.->|BYOK 密钥直连| MultiClients
-    A1 -.->|双向数据同步| A3
+    subgraph Storage["数据与对象存储"]
+        direction LR
+        DB[("关系数据库<br/>Cloudflare D1 / SQLite")]
+        OSS[("对象存储<br/>Cloudflare R2 / S3 兼容")]
+    end
+
+    Clients -->|BYOK 客户端直连 · 隐私安全| LLMs
+    Clients <-->|HTTPS 增量同步| API
+    Agents <-->|MCP Tools / SSE 协议| MCP
+
+    API <--> DB
+    API <--> OSS
+    MCP <--> DB
+    MCP <--> OSS
 \`\`\`
 
 ---
@@ -1353,34 +1354,35 @@ The Mermaid diagram below demonstrates how EdgeEver connects cross-platform clie
 
 \`\`\`mermaid
 flowchart TD
-    subgraph MultiClients["Client Matrix"]
-        C1["Web / PWA (Offline Drafts & Sync Queue)"]
-        C2["macOS Desktop (Electron + Rust Sidecar)"]
-        C3["Windows / Linux Desktop (ACP Agent Integration)"]
-        C4["Android Native App (Expo + SQLite)"]
-        C5["iOS Native App (SwiftUI + GRDB)"]
-        C6["Web Clipper (Chrome / Edge / Firefox)"]
+    subgraph ClientLayer["Cross-platform clients"]
+        Clients["Cross-Platform Clients<br/>Web · PWA · Desktop Apps<br/>iOS · Android · Web Clipper"]
     end
 
-    subgraph CoreEngine["Service & Storage Core"]
-        API["Hono API Engine (Cloudflare Workers / Docker)"]
-        MCP["Native MCP Endpoint (/mcp 2026-07-28 & 2025)"]
-        D1[("D1 / SQLite Database (Sync Cursor & Revisions)")]
-        R2[("R2 / S3 Storage (Images & Media Attachments)")]
+    subgraph Ecosystem["AI & External Ecosystem"]
+        direction LR
+        LLMs["LLM Providers<br/>OpenAI · Gemini · DeepSeek"]
+        Agents["External AI Agents<br/>Claude Code · Cursor · Antigravity"]
     end
 
-    subgraph AIAgents["AI Agents & Integrations"]
-        A1["Claude Code / Cursor / Antigravity"]
-        A2["Inline AI Assistant (OpenAI / Gemini / DeepSeek)"]
-        A3["Notion DB / Feishu Bitable Sync"]
+    subgraph Platform["EdgeEver Platform Core (Cloudflare Workers / Docker)"]
+        API["Unified REST API Entry<br/>Auth · Rate Limiting · Sync Cursor"]
+        MCP["Native MCP Endpoint (/mcp)<br/>Context Retrieval · Read/Write Tools"]
     end
 
-    MultiClients <==>|REST API & Sync Cursor| API
-    API <==> D1 & R2
-    MCP <==> D1 & R2
-    A1 <==>|MCP Tools / SSE| MCP
-    A2 -.->|BYOK Direct Key| MultiClients
-    A1 -.->|Bi-directional Sync| A3
+    subgraph Storage["Data & Object Storage"]
+        direction LR
+        DB[("Relational Database<br/>Cloudflare D1 / SQLite")]
+        OSS[("Object Storage<br/>Cloudflare R2 / S3 Compatible")]
+    end
+
+    Clients -->|Direct BYOK · Privacy First| LLMs
+    Clients <-->|HTTPS Incremental Sync| API
+    Agents <-->|MCP Tools / SSE Protocol| MCP
+
+    API <--> DB
+    API <--> OSS
+    MCP <--> DB
+    MCP <--> OSS
 \`\`\`
 
 ---
