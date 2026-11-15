@@ -10,6 +10,7 @@ import {
 import { dirname, resolve } from "node:path";
 import {
   buildLocalDevEnvironmentFile,
+  configureDemoAssetRouting,
   deployedWorkerSettings,
   DEPLOYMENT_TARGETS_PATH,
   findD1DatabaseIdByName,
@@ -362,6 +363,8 @@ if (localDemoSeed && !["true", "false"].includes(localDemoSeed)) {
   throw new Error("EDGE_EVER_LOCAL_DEMO_SEED must be true or false.");
 }
 
+config = configureDemoAssetRouting(config, demoMode === "true");
+
 if (demoMode === "true") {
   // Default: daily 19:00 UTC = 03:00 China Standard Time (UTC+8).
   const demoResetCron = envValue("DEMO_RESET_CRON") || "0 19 * * *";
@@ -372,19 +375,6 @@ if (demoMode === "true") {
 crons = [${tomlString(demoResetCron)}]
 `;
 }
-
-const workerFirstPatterns = [
-  "/api/*",
-  "/mcp",
-  "/oauth/*",
-  "/.well-known/*",
-  "/__scheduled",
-];
-config = config.replace(
-  /run_worker_first\s*=\s*\[[^\]]*\]/m,
-  `run_worker_first = ${JSON.stringify(workerFirstPatterns)}`,
-);
-changed = true;
 
 const customDomain = envValue("CUSTOM_DOMAIN");
 const routePattern = envValue("ROUTE_PATTERN") || customDomain;

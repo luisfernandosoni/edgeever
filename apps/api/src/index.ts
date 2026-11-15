@@ -1,3 +1,5 @@
+import { servePublicDemoRequest } from "./public-demo-page";
+import { isEdgeEverAppPath } from "./app-paths";
 import { isDatabaseDailyQuotaError } from "./database-errors";
 import {
   createExcerpt,
@@ -56,7 +58,7 @@ import type {
 } from "./storage-contract";
 import type { AppContext, AppEnv, AuthContext, Bindings, WorkerBindings } from "./api-context";
 import { AppError } from "./app-error";
-import { hashPassword, randomToken } from "./auth-crypto";
+import { hashPassword } from "./auth-crypto";
 import {
   apiError,
   authNotConfigured,
@@ -76,7 +78,6 @@ import {
 import { registerTagRoutes } from "./tag-routes";
 import { registerTemplateRoutes } from "./template-routes";
 import { registerAuthRoutes } from "./auth-routes";
-import { registerOAuthRoutes } from "./oauth-routes";
 import { registerApiTokenRoutes } from "./api-token-routes";
 import { registerObjectStorageRoutes } from "./object-storage-routes";
 import { registerAiRoutes } from "./ai-routes";
@@ -84,6 +85,7 @@ import { registerPluginCapabilityRoutes } from "./plugin-capability-routes";
 import { registerCompanionRoutes } from "./companion-routes";
 import { registerAiPromptRoutes } from "./ai-prompt-routes";
 import { registerResourceRoutes } from "./resource-routes";
+import { registerPublicPublishImageRoutes, registerPublishImageRoutes } from "./publish-image-routes";
 import {
   abortResourceUpload,
   completeResourceUpload,
@@ -127,6 +129,7 @@ import { isNotebookSitePagePath, renderNotebookSitePage } from "./notebook-site-
 import { isPublicMemoSharePagePath, renderPublicMemoSharePage } from "./share-page";
 import { registerMemoShareRoutes, registerPublicShareRoutes } from "./share-routes";
 import { registerPublicTableFormRoutes, registerTableFormRoutes } from "./table-form-routes";
+import { registerPublicPendingResourceRoutes } from "./pending-resource-routes";
 import {
   deleteStoredObjects,
   getActiveObjectStorageConfig,
@@ -266,6 +269,8 @@ app.get("/api/openapi.json", (c) => c.json(apiProbe));
 registerPublicShareRoutes(app);
 registerPublicNotebookShareRoutes(app);
 registerPublicTableFormRoutes(app);
+registerPublicPendingResourceRoutes(app);
+registerPublicPublishImageRoutes(app);
 
 registerAuthRoutes(app, {
   authenticateRequest: (...args) => authenticateRequest(...args),
@@ -353,49 +358,6 @@ registerAiPromptRoutes(app, {
 registerApiTokenRoutes(app, {
   sha256: (...args) => sha256(...args),
 });
-
-registerOAuthRoutes(app, {
-  getAdminUser: async (c) => {
-    // Find admin/owner user from database
-    const user = await c.env.storage.db.prepare(
-      `SELECT u.id, u.username, wm.workspace_id
-       FROM users u
-       INNER JOIN workspace_members wm ON wm.user_id = u.id
-       WHERE u.is_disabled = 0
-       ORDER BY CASE WHEN wm.role = 'owner' THEN 0 ELSE 1 END, u.created_at ASC
-       LIMIT 1`
-    ).first<{ id: string; username: string; workspace_id: string }>();
-
-    if (user) {
-      return { id: user.id, username: user.username, workspaceId: user.workspace_id };
-    }
-
-    // Fallback if users table doesn't have workspace member yet
-    const anyUser = await c.env.storage.db.prepare(
-      `SELECT id, username FROM users WHERE is_disabled = 0 ORDER BY created_at ASC LIMIT 1`
-    ).first<{ id: string; username: string }>();
-
-    if (anyUser) {
-      return { id: anyUser.id, username: anyUser.username, workspaceId: DEFAULT_WORKSPACE_ID };
-    }
-
-    return null;
-  },
-  createApiToken: async (c, user, label) => {
-    const id = createId("tok");
-    const token = `eev_${randomToken(32)}`;
-    const now = isoNow();
-    const scopes = ["read:memos", "write:memos", "read:notebooks", "write:notebooks", "read:resources", "write:resources", "read:tags", "write:tags"];
-    const hash = await sha256(token);
-
-    await c.env.storage.db.prepare(
-      `INSERT INTO api_tokens (id, workspace_id, name, token_hash, token_value, scopes_json, expires_at, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, NULL, ?)`
-    ).bind(id, user.workspaceId, label, hash, token, JSON.stringify(scopes), now).run();
-
-    return token;
-  },
-});
 registerNotebookRoutes(app, async (env) => {
   if (isDemoMode(env)) await ensureDemoSeed(env);
 });
@@ -453,6 +415,7 @@ registerMcpRoutes(app, {
 });
 
 
+registerPublishImageRoutes(app);
 registerResourceRoutes(app, {
   clampNumber: (...args) => clampNumber(...args),
   createAttachmentResource: (...args) => createAttachmentResource(...args),
@@ -518,27 +481,32 @@ export const fetchEdgeEverApp = async (
 
 const worker = {
   async fetch(request: Request, env: WorkerBindings, ctx: ExecutionContext) {
-    const { pathname } = new URL(request.url);
-    const loadAppShell = () => env.ASSETS.fetch(new Request(new URL("/", request.url), { method: "GET" }));
-    if (isNotebookSitePagePath(pathname)) {
-      return (await renderNotebookSitePage(request, createCloudflareStorageAdapter(env).db, loadAppShell))!;
-    }
-    // `/share/*` runs the worker first. Unknown share paths still fall through
-    // to the asset shell so a typo does not become a JSON 404.
-    if (pathname.startsWith("/share/")) {
-      if (isPublicMemoSharePagePath(pathname)) {
-        const page = await renderPublicMemoSharePage(request, createCloudflareStorageAdapter(env).db, loadAppShell);
-        if (page) return page;
+    return servePublicDemoRequest(request, async () => {
+      const { pathname } = new URL(request.url);
+      const loadAppShell = () => env.ASSETS.fetch(new Request(new URL("/", request.url), { method: "GET" }));
+      if (isNotebookSitePagePath(pathname)) {
+        return (await renderNotebookSitePage(request, createCloudflareStorageAdapter(env).db, loadAppShell))!;
       }
-      return env.ASSETS.fetch(request);
-    }
-    return fetchEdgeEverApp(request, {
-      ...env,
-      storage: createCloudflareStorageAdapter(env),
-      deploymentVersionCreatedAt: env.CF_VERSION_METADATA?.timestamp,
-      // workerd's default Internet egress checks resolved addresses against its public-only network policy.
-      publicNetworkFetch: (url, init) => fetch(url, init),
-    }, ctx);
+      // `/share/*` runs the worker first. Unknown share paths still fall through
+      // to the asset shell so a typo does not become a JSON 404.
+      if (pathname.startsWith("/share/")) {
+        if (isPublicMemoSharePagePath(pathname)) {
+          const page = await renderPublicMemoSharePage(request, createCloudflareStorageAdapter(env).db, loadAppShell);
+          if (page) return page;
+        }
+        return env.ASSETS.fetch(request);
+      }
+      if (!isEdgeEverAppPath(pathname) && pathname !== "/__scheduled") {
+        return env.ASSETS.fetch(request);
+      }
+      return fetchEdgeEverApp(request, {
+        ...env,
+        storage: createCloudflareStorageAdapter(env),
+        deploymentVersionCreatedAt: env.CF_VERSION_METADATA?.timestamp,
+        // workerd's default Internet egress checks resolved addresses against its public-only network policy.
+        publicNetworkFetch: (url, init) => fetch(url, init),
+      }, ctx);
+    });
   },
   async scheduled(controller: ScheduledController, env: WorkerBindings, ctx: ExecutionContext) {
     const runtimeEnv = {
@@ -1000,8 +968,13 @@ const resetDemoData = async (
     );
     const resourceRows = await db.prepare(`SELECT object_key, storage_config_id FROM resources`).all<{ object_key: string; storage_config_id: string }>();
     await deleteStoredObjects(env, resourceRows.results);
+    const pendingRows = await db.prepare(
+      `SELECT object_key, storage_config_id FROM pending_resources WHERE storage_config_id IS NOT NULL`,
+    ).all<{ object_key: string; storage_config_id: string }>();
+    await deleteStoredObjects(env, pendingRows.results);
 
     const resetStatements: D1PreparedStatement[] = [
+      db.prepare(`DELETE FROM pending_resources`),
       db.prepare(`DELETE FROM mobile_sync_changes`),
       db.prepare(`DELETE FROM memo_search_documents`),
       db.prepare(`DELETE FROM resources`),
