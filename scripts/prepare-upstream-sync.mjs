@@ -47,6 +47,7 @@ function restoreProtectedUpdater(cwd, baseCommit) {
     });
 
     if (pathExists.status === 0) {
+      runGit(["rm", "-r", "-f", "--ignore-unmatch", "--", path], { cwd });
       runGit(
         ["restore", `--source=${baseCommit}`, "--staged", "--worktree", "--", path],
         { cwd },
